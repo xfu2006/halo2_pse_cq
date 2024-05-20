@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "halo2",
+    "halo2_proofs",
+    "halo2_frontend",
+    "halo2_middleware",
+    "halo2_backend",
+]
+resolver = "2"

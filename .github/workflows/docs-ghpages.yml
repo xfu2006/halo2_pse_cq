@@ -1,0 +1,57 @@
+name: halo2 docs ghpages
+# Setup docs for ghpages
+
+on:
+  push:
+    branches:
+      - main
+permissions:
+  contents: write
+  
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2023-10-05
+          override: true
+
+      - name: Copy the html file to workspace crates
+        run: |
+          for cargo_toml in $(find . -name Cargo.toml); do
+            crate_dir=$(dirname $cargo_toml)
+            cp .github/katex-header.html $crate_dir
+            echo "Copied html file to $crate_dir"
+          done
+
+      - name: Build latest rustdocs
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --no-deps --all-features --workspace
+        env:
+          RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs --html-in-header ${{ github.workspace }}/halo2_proofs/katex-header.html
+
+      - name: Create the required index page and move the latest rustdocs into docs
+        run: |
+          rm -rf ./docs
+          cp -R ./target/doc ./docs
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=halo2_proofs\">" > ./docs/index.html
+
+      - name: Delete the html files copied to every crate
+        run: |
+          for cargo_toml in $(find . -name Cargo.toml); do
+            crate_dir=$(dirname $cargo_toml)
+            rm -f $crate_dir/katex-header.html
+            echo "Deleted html file in $crate_dir"
+          done
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+

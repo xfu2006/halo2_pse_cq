@@ -1,0 +1,97 @@
+[package]
+name = "halo2_proofs"
+version = "0.3.0"
+authors = [
+    "Sean Bowe <sean@electriccoin.co>",
+    "Ying Tong Lai <yingtong@electriccoin.co>",
+    "Daira Hopwood <daira@electriccoin.co>",
+    "Jack Grigg <jack@electriccoin.co>",
+    "Privacy Scaling Explorations team",
+]
+edition = "2021"
+rust-version = "1.66.0"
+description = """
+Fast PLONK-based zero-knowledge proving system with no trusted setup
+"""
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/zcash/halo2"
+documentation = "https://docs.rs/halo2_proofs"
+readme = "README.md"
+categories = ["cryptography"]
+keywords = ["halo", "proofs", "zkp", "zkSNARKs"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs", "--html-in-header", "katex-header.html"]
+
+[[bench]]
+name = "commit_zk"
+harness = false
+
+[[bench]]
+name = "hashtocurve"
+harness = false
+
+[[bench]]
+name = "plonk"
+harness = false
+
+[[bench]]
+name = "dev_lookup"
+harness = false
+
+[dependencies]
+halo2_middleware = { path = "../halo2_middleware" }
+halo2_backend = { path = "../halo2_backend" }
+halo2_frontend = { path = "../halo2_frontend" }
+halo2curves = { version = "0.6.0", default-features = false }
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+plotters = { version = "0.3.0", default-features = false, optional = true }
+group = "0.13"
+
+[dev-dependencies]
+ff = "0.13"
+group = "0.13"
+tracing = "0.1"
+rand_chacha = "0.3"
+rayon = "1.8"
+assert_matches = "1.5"
+criterion = "0.3"
+gumdrop = "0.8"
+proptest = "1"
+dhat = "0.3.2"
+serde_json = "1"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+[features]
+default = ["batch", "bits"]
+dev-graph = ["halo2_frontend/dev-graph", "plotters"]
+test-dev-graph = [
+    "halo2_frontend/test-dev-graph",
+    "dev-graph",
+    "plotters/bitmap_backend",
+    "plotters/bitmap_encoder",
+    "plotters/ttf"
+]
+bits = ["halo2curves/bits"]
+gadget-traces = []
+thread-safe-region = []
+sanity-checks = []
+batch = ["rand_core/getrandom"]
+circuit-params = ["halo2_frontend/circuit-params"]
+heap-profiling = []
+cost-estimator = ["halo2_frontend/cost-estimator"]
+derive_serde = ["halo2curves/derive_serde"]
+
+[lib]
+bench = false
+
+[[example]]
+name = "circuit-layout"
+required-features = ["test-dev-graph"]
+
+[[example]]
+name = "proof-size"
+required-features = ["cost-estimator"]

@@ -1,0 +1,174 @@
+=============================
+Change Log over Halo2
+=============================
+--------
+A. Changes over Constraint/Expression System
+--------
+1.  halo2_frontend/src/plonk/expression.rs
+	[a] add CqTableColumn which currently has ache_id
+2.  halo2_frontend/src/plonk/constraint_system.rs
+	[a] add function cq_lookup_table_coumn
+3. add halo2_frontend/src/plonk/cq_lookup.rs
+4. modify halo2_frontend/src/plonk/circuit/constraint_system.rs
+	[a] add set_cq_table
+5. in halo2_frontend/src/plonk/circuit/cq_lookup.rs
+	[a] add set_cq_table
+	[b] add cache_exists
+6. halo2_frontend/src/plonk/circuit/constraint_system.rs
+	[a]  add assign_cq_table
+7. in halo2_frontsend/src/plonk/cq_lookup.rs
+	[a] add set_cq_table_value related functions.
+
+--------
+B. Changes over MockProver
+--------
+1. in halo_frontend/src/dev.rs
+	[a] add the cq_lookup_errors
+2. in halo2_frontend/src/plonk/circuit/constraint.system
+	[a] update replace_selectors_with_fixed, add the
+		handling of cq_lookup expressions so that
+		MockProver's sanity check works for cq lookup as well.
+
+
+--------
+C. Changes over halo2_middleware and backend (mainly setup and
+framework)
+--------
+1. in halo_middleware/src add cq_lookup
+	keep the data structures only and note the Expression to VarMid
+2. in halo_frontend/src/plonk/circuit/constrint_system.rs
+	update impl From<ConstraintSystem> for ConstraintSystemMid
+	-> add the handling of cq_lookups
+3. in halo_backend/src/plonk/circuit.rs
+	-> add definition of CqLookUpBack
+	-> add cq_lookups as lookups
+	-> update impl From<ConstraintSystemMid > for ConstraintSystemBack
+	-> add function cs_mid_collect_queries_cq_cq_lookup
+4. in halo2_backend/src/plonk add cq_lookup
+	[a] copy zk_cq.rs to cq_lookup
+5. in halo2_backend/src/poly/kzg/commitment.rs
+	[a] add function setup_with_s() so that it can share
+	the same trapdoor of ParamsKZG_CQ
+	[b] modify setup(k:u32, rng:R) correspondingly 
+6. in halo2_backend/src/plonk/cq_lookup/batch_kzg.rs
+	[a] add setup function to generate pairs of ParamsKzg and
+		ParamsKzgCq which share the same trapdoor s.
+7. add halo2_backend/src/plonk/cq_lookup/utils.rs
+	[a] add log function and other related functions
+8. add halo2_backend/src/plonk/ft_poly_ops.rs
+	for frequently used polynomial functions
+9. in halo2_proofs/src/plonk/prover.rs
+	[a] add create_proof_cq and adapt the old create_proof
+		by calling it.
+10. in halo2_backend/src/plonk/circuit.cs
+	[a] in ConstrintSystemBack add function preprocess_cq
+
+--------
+D. halo2_backend prover and verifier
+--------
+1. in halo2_proofs/src/plonk/prover.rs
+	[a] add create_proof_custom_with_engine_cq and modify
+		the original function
+2. in halo2_backend/src/plonk/prover.rs
+	[a] add PE:Engine as parameter to Prover and ProverSingle
+		(unfortunately CommitmentScheme is parametric and can
+			be IPA, thus unable to support pairing engines.
+			In this case, it looks the simplest way is to
+			add an optional PE:Engine type parameter here
+			to make compiler happy).
+	[b] similaly add new_with_engine_cq and adapt all
+		functions correspondingly
+3. in halo2_proof/src/plonk/prover.rs and verifier.rs
+	[a] plug in cq_lookup prover and verifier calls
+		right following the lookup calls, correspondingly.
+4. in halo2_proof/src/plonk/evaluator.rs
+	[a] add the code for adding expressions for cq_lookup
+		similar to that of lookup.
+5. in halo2_proof/src/plonk/prover.rs
+	[a] modify the evaluate_h correspondingly by calling
+	the new evalution.rs:evaluate_h
+6. fix one minor corner case bug in halo2_backend/src/poly.rs
+	add "if rhs.values.len()>start" at line 213, to deal
+		with the case that the rhs has a smaller vector
+7. add the call the zk_cq_nizk functions in
+	halo2_backend/src/cq_lookup/prover.rs
+	mainly in CqCommitted structure
+	[a] add the vec_columns
+	[b] add the CqProof structure
+	[c] add the seiralization (write to transcript)
+8. in halo2_frontend/src/circuit.rs there is like a BUG in the
+complex_selector mode. The fixed columns have ALREADY been
+created for selectors but the columns are then APPENDED to the
+cs.fixed again, which causes waste of columns and also
+misalignment of selector columns when they are queried
+	-> at line 100, define num_fix_col as a conditional 
+	assignment, in the complex_selector mode be the value
+	of num_fix_col - num_of_selectors which is the real value of
+	fixed columns then at line 120, the "fixed.extended(selector_polys)"
+	append the right value.
+	-> NOTE that fixed columns (last num_blinding factor items need
+	to be randomized!) -fix the bug
+
+9.. in halo2_backend/src/plonk/verifier.rs, add
+	function verify_proof_cq to add CqVerifierScheme
+	as an additional parameter, and similarly
+	adapt other realted functions.
+
+10.. Several testing function in a variety of files who calls
+	create_proof and verify_proof needs to
+	add additional CONCRETE type parameters in the calls.
+	e.g.,
+	CqProverSchemeKzg<Bn256, Challenge255<_>, Blake2bWrite<Vec<u8>,_,Challenge255<_>>>
+	--- This unfortunately would be unaoidable, but the fix takes
+	no more than 5 or 6 calls, mostly in test code
+	E.g., halo2_proofs/tests/plonk_api.rs; halo2_proofs/tests/frontend_backend_split.rs; (the main idea is to insert type parameter of CqProverSchemeKZG etc.)
+	Note that dummy IPA types for ProverScheme/VerifierSchemes are available
+	as well. Insert the following based on which IPA scheme is used
+	*********************
+	CqProverSchemeKzg<Bn256, Challenge255<_>, Blake2bWrite<Vec<u8>,_,Challenge255<_>>>
+	CqVerifierSchemeKzg::<Bn256, Challenge255<G1Affine>, Blake2bRead<_,_,Challenge255<_>>>
+	CqProverSchemeIPA<EqAffine, Challenge255<_>, Blake2bWrite<_,_,Challenge255<_>>>
+ 	CqVerifierSchemeIPA::<EqAffine, Challenge255<_>, Blake2bRead<_,_,Challenge255<_>>>
+	*********************
+
+--------
+E. handling ZK and connecting with zk-cq
+---------
+1. The problem: when input_expressions are used for look up tables,
+	when they are mixed as input_value column, the blinders are all
+	zeros (because of the selectors). This leaks the information (even
+	when committed because commit_lagrange actually ignores the final blinder).
+	To fix the problem, pad the fixed column (converted from the
+	selector colums) with blinders. However, sine the compile_circuit
+	is called multiple times, we need to avoid generating different blinders
+	at different calls (so that vk and pk actually use different blinder
+	values for these fixed columns), thus, we need to pass in the 
+	"initial" value for the blinder vector.
+	[a] in halo2_frontend/src/circuit.rs compile_circuit() add
+		a function with optional parameter random_selector_blinders
+	[b] in halo2_proofs/src/plonk/keygen.rs: keygen_vk_custom()
+		similarly creating an additional function for taking 
+		random_selector_blinders
+	[c] in halo2_proofs/src/plonk/keygen.rs: keygen_pk_custom()
+		similarly create an additional function for taking random_slector_blinders.
+	[d] in halo2_backend/src/plonk/constraint.system, icnrease
+		blinding_factors() by 1 for cq,
+		also need to change halo2_backend/src/plonk/keygen.rs
+	[e] The change of blinding factors will fail a number of unit test cases,
+	need to generally change the config of number of rows in a number of
+	unit test cases:
+		-> needs to change halo2_frontend/src/circuit/floor_planner/v1.rs:505
+		-> change "3" to "4" in MockProver::run(...) to let it pass (as the
+			blinding factors increased by 1.
+		-> also fix the unit test case in
+			halo2_frontesnd/src/circuit/floor_planner/single_pass.rs
+		-> also fix ParamsKZG::setup(3...) -> "4"
+			in halo2_proof/src/plonk/prover.rs (one for
+				test_custome_create_proof() and one for
+				test_create_proof()
+
+-----------------
+F. Comparison of Proof Size
+-----------------
+*** before adding cq-up, the proof size is 868 bytes.
+*** after adding cq-up, the proof size is 1312 bytes.
