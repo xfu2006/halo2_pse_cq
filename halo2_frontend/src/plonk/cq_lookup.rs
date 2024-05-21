@@ -120,8 +120,8 @@ impl<F: Field> Argument<F> {
 	}
 
 	/// check if the cache for table column exists
-	pub fn cache_exists(&self, col_id: usize) -> bool{
-		println!("cache_exists not implemented! return false. col_id: {}", col_id);
+	pub fn cache_exists(&self, _col_id: usize) -> bool{
+		//println!("cache_exists not implemented! return false. col_id: {}", col_id);
 		false
 	}
 }
