@@ -1,9 +1,10 @@
 /* PORTED from IZPR Project. This contains several polynomial
 operations which enhances the original one in halo2_backend/poly.
+TODO: some of the functions (e.g., evals_to_coefs) can be further 
+optimized or using existing halo2 functions.
 */
 
 extern crate rayon;
-
 use self::rayon::prelude::*; 
 use blake2b_simd::{Params as Blake2bParams};
 use std::convert::TryInto;
@@ -35,6 +36,7 @@ pub fn log2(n: usize)->usize{
 
 	k
 }
+
 /// get the closet power of 2
 pub fn closest_pow2(n: usize)->usize{
 	let k = log2(n);
@@ -64,6 +66,7 @@ pub fn to_vecu8<G: GroupEncoding>(v: &Vec<G>)->Vec<u8>{
 	v2
 }
 
+/// convert an array of field elements to byte array
 pub fn to_vecu8_field<F: PrimeField>(v: &Vec<F>)->Vec<u8>{
     if v.len()==0 {return vec![];}
     let mut v2 = vec![];
@@ -315,7 +318,6 @@ pub fn get_root_of_unity<F:PrimeField>(n: u64)->F{
 	r
 }
 
-
 /// build a dense polynomial given coefs vector 
 pub fn get_poly<F:PrimeField>(v: Vec<F>)-> Polynomial<F,Coeff>{
 	let v2 = if v.len().is_power_of_two() {v} else 
@@ -493,7 +495,6 @@ pub fn div<F:PrimeField>(a: &Polynomial<F,Coeff>, b: &Polynomial<F,Coeff>)-> Pol
 }
 
 
-
 /// takes care of unequal length of values
 pub fn add<F:PrimeField>(a: &Polynomial<F,Coeff>, b: &Polynomial<F,Coeff>)-> Polynomial<F,Coeff>{
 	let n1 = a.values.len();
@@ -653,7 +654,6 @@ pub fn compute_powers<F: Field>(size: usize, g: F) -> Vec<F> {
 
 
 
-/*
 /// slow: call with caution
 pub fn is_zero<F:PrimeField>(f: &Polynomial<F,Coeff>)->bool{
 	for i in 0..f.values.len(){
@@ -662,11 +662,6 @@ pub fn is_zero<F:PrimeField>(f: &Polynomial<F,Coeff>)->bool{
 
 	true
 }
-
-
-
-
-
 
 
 /// returning the polynomial with degree lower than k
@@ -751,13 +746,6 @@ pub fn ceil_log2(n: usize) -> usize{
 	return k as usize;
 }
 
-/** constructr polynomial */
-fn build_poly<F:PrimeField>(v: &Vec<u64>)->Polynomial<F,Coeff>{
-	let mut v2: Vec<F> = vec![];
-	for i in 0..v.len(){ v2.push(F::from(v[i])); }
-	get_poly(v2)
-} 
-
 
 /// compute the inverse of f mod x^(2^k).
 ///	Ref: (1) http://people.seas.harvard.edu/~madhusudan/MIT/ST15/scribe/lect06.pdf
@@ -772,8 +760,6 @@ pub fn inv<F:PrimeField>(g: &Polynomial<F,Coeff>, k: usize)
 		panic!("INV err: coef0 can't be zero!");
 	}
 	let c0 = g.values[0].invert().unwrap();
-	let zero= get_poly(vec![F::ZERO]);
-	let one= get_poly(vec![F::from(1u64)]);
 	let mut a = get_poly(vec![c0]);
 	let mut t = 1;
 	let mut b;
@@ -803,7 +789,7 @@ pub fn inv<F:PrimeField>(g: &Polynomial<F,Coeff>, k: usize)
 pub fn degree<F:PrimeField>(f: &Polynomial<F, Coeff>)->usize{
 	let mut degree = f.values.len()-1;
 	let n = f.values.len();
-	for i in 0..n{
+	for _i in 0..n{
 		if f.values[degree]==F::ZERO{
 			degree -= 1;
 		}else{
@@ -904,7 +890,6 @@ pub fn neg<F:PrimeField>(a1: &Polynomial<F,Coeff>) -> Polynomial<F,Coeff>{
 	}
 	a
 }
-*/
 
 
 /*

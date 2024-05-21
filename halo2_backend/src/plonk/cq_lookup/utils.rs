@@ -1,5 +1,4 @@
-/** Utility functions.
-Ported from IZPR Project
+/** Utility functions.  Ported from IZPR Project
 */
 
 use std::time::Instant;

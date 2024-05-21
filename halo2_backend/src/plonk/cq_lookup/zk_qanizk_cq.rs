@@ -143,7 +143,7 @@ pub fn prove_cq_adv<PE:Engine>(
 { 
 	//1. check input
 	let b_perf = true;
-	let b_test = true;
+	let b_test = false;
 	let mut timer = Timer::new();
 	let n2_raw = query_table.len();
 	let n2 = closest_pow2(n2_raw); 
@@ -615,97 +615,6 @@ pub fn sparse_ped_commit2<G:CurveAffine>(
 	(comp1 + comp2.into()).into()
 }
 
-
-/*
-/// return sum_{i=0}^n vec[i]*bases[idx_arr[i]]
-pub fn sparse_inner_prod<F:FftField>(
-	idx_arr: &Vec<usize>,
-	vec: &Vec<F>,
-	bases: &Vec<F>) -> F{
-	let n = idx_arr.len();
-	assert!(n==vec.len(), "n!=vec.len");
-	assert!(n<=bases.len(), "n>bases.len");
-	let arr_bases = idx_arr.par_iter().map(|idx| bases[*idx]).
-		collect::<Vec<_>>();
-
-	let res1 = vec.par_iter().zip(arr_bases.par_iter())
-		.map(|(v1, v2)| (*v1) * (*v2)).sum();
-
-	res1
-}
-
-
-#[derive(Clone)]
-pub struct  MyHashMap<PE>{
-	pub map: HashMap<PE, usize>
-}
-
-// Implement Serialization for `HashMap<T>`
-impl<T: CanonicalSerialize> CanonicalSerialize for MyHashMap<T> {
-    #[inline]
-    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-		let entries = self.map.keys().len();
-		entries.serialize(&mut writer).unwrap();
-		for (key, value) in &self.map{
-			key.serialize(&mut writer).unwrap();
-			value.serialize(&mut writer).unwrap();
-		}
-		Ok(())
-    }
-
-    #[inline]
-    fn serialized_size(&self) -> usize {
-		let mut size = 0;
-		for (key, value) in &self.map{
-			size += key.serialized_size();
-			size += value.serialized_size();
-		}
-		size
-    }
-
-    #[inline]
-    fn serialize_uncompressed<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        self.serialize(&mut writer)
-    }
-
-    #[inline]
-    fn uncompressed_size(&self) -> usize {
-		self.serialized_size()
-    }
-
-    #[inline]
-    fn serialize_unchecked<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        self.serialize(&mut writer)
-    }
-}
-
-impl<T: FftField> CanonicalDeserialize for MyHashMap<T> {
-    #[inline]
-    fn deserialize<R: Read>(reader: R) -> Result<Self, SerializationError> {
-        Self::deserialize_unchecked(reader)
-    }
-
-    #[inline]
-    fn deserialize_uncompressed<R: Read>(reader: R) -> Result<Self, SerializationError> {
-        Self::deserialize_unchecked(reader)
-    }
-
-    #[inline]
-    fn deserialize_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-		let entries = usize::deserialize(&mut reader).unwrap();
-		let mut map = HashMap::<T,usize>::new();
-		for _i in 0..entries{
-			let key = T::deserialize(&mut reader).unwrap();
-			let value = usize::deserialize(&mut reader).unwrap();	
-			map.insert(key, value);
-		}
-		let mymap = MyHashMap{map:map};
-		Ok(mymap)
-    }
-}
-
-*/
-
 /// generate vector m such that m_i is the number of
 /// It returns the compact form (idx_arr, compact_m)
 /// where compact_m[i] is m[idx_arr[i]], i.e., it contains
@@ -760,22 +669,6 @@ fn gen_m_tables<PE:Engine>(lookup_loc_info: &HashMap<Vec<u8>,usize>,
 	}
 	return (idx_arr, occ_arr);
 }
-
-
-/*
-/// expand the sparse representation (idx, values) into a full vector
-/// of size target_n so that res[i] = 0 if i not in idx, but
-/// result[idx[i]] = values[i] for each i in [0, len(values) 
-/// for debug use only (slow)
-fn expand_sparse_vec<F:Field>(target_n: usize, idx: &Vec<usize>, 
-	values: &Vec<F>)->Vec<F>{
-	let mut res = vec![F::ZERO; target_n];
-	for i in 0..idx.len(){
-		res[idx[i]] = values[i];
-	}	
-	res
-}
-*/
 
 
 /// extend the vector to the desired size with 0's elements
@@ -866,7 +759,7 @@ fn compute_coeff_q_b_v2<F:PrimeField>(b: &Vec<F>, r_b: F, t: &Vec<F>, r_t: F, be
 ->(Vec<F>,Vec<F>, Vec<F>){
 	assert!(n.is_power_of_two(), "n is not power of 2!");
 	assert!(b.len()<=n, "b.len MUST be < n");
-	let b_test = true;
+	let b_test = false;
 	let b_perf = true;
 	let mut timer = Timer::new();
 
@@ -958,73 +851,10 @@ fn compute_coeff_q_b<F:PrimeField>(b: &Vec<F>, r_b: F, t: &Vec<F>, r_t: F, beta:
 	}
 }
 
-
-/*
-// -- the following Arc seerialization code is adapted from ark_work
-// -- atomic reference counter box.
-#[derive(Clone)]
-pub struct MyArc<T>{
-	pub arc: Arc<T>,
-}
- 
-impl <T> MyArc<T>{
-	pub fn new(arc_inp: T) -> Self{
-		return Self{arc: Arc::new(arc_inp)};
-	}
-	pub fn as_ref(&self)->&T{
-		return self.arc.as_ref();
-	}
-}
-
-impl<T: CanonicalSerialize> CanonicalSerialize for MyArc<T> {
-    #[inline]
-    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        self.as_ref().serialize(&mut writer)
-    }
-
-    #[inline]
-    fn serialized_size(&self) -> usize {
-        self.as_ref().serialized_size()
-    }
-
-    #[inline]
-    fn serialize_uncompressed<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        self.as_ref().serialize_uncompressed(&mut writer)
-    }
-
-    #[inline]
-    fn uncompressed_size(&self) -> usize {
-        self.as_ref().uncompressed_size()
-    }
-
-    #[inline]
-    fn serialize_unchecked<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        self.as_ref().serialize_unchecked(&mut writer)
-    }
-}
-
-impl<T: CanonicalDeserialize> CanonicalDeserialize for MyArc<T> {
-    #[inline]
-    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(MyArc::new(T::deserialize(&mut reader)?))
-    }
-
-    #[inline]
-    fn deserialize_uncompressed<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(MyArc::new(T::deserialize_uncompressed(&mut reader)?))
-    }
-
-    #[inline]
-    fn deserialize_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(MyArc::new(T::deserialize_unchecked(&mut reader)?))
-    }
-}
-// The above MyArc is adapted from ark-work
-*/
-
 // -----------------------------------------------------------
 // endregion: utility functions and data structures
 // -----------------------------------------------------------
+
 #[cfg(test)]
 mod tests_cq{
 	extern crate rayon;

@@ -6,24 +6,6 @@
 
 */
 
-/*
-extern crate ark_ff;
-extern crate ark_ec;
-extern crate ark_poly;
-extern crate ark_serialize;
-extern crate ark_std;
-extern crate ark_bls12_381;
-
-use utils::os::*;
-use utils::consts::*;
-use zk_cq::serial_group_fft2::*;
-use zk_cq::ft_poly_ops::*;
-
-use self::ark_ff::{FftField, Field, One, Zero};
-use self::ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
-use self::ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial, };
-use self::ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve,msm::{VariableBaseMSM}};
-G*/
 extern crate rayon;
 use self::rayon::prelude::*; 
 use halo2curves::{pairing::Engine,CurveExt};
@@ -40,15 +22,6 @@ use rand_core::OsRng;
 use crate::plonk::cq_lookup::ft_poly_ops::{compute_powers,vanish_poly,fixed_msm,closest_pow2,get_root_of_unity,eval_coefs_at, evals_to_coefs, serial_group_fft,serial_fft, serial_group_ifft};
 
 
-/*
-/// global trapdoor for debugging
-pub const GLOBAL_TRAPDOOR_S: u64 = 2820923481723487u64;
-pub const GLOBAL_TRAPDOOR_K1: u64 =1823720394820293u64;
-pub const GLOBAL_TRAPDOOR_K2: u64 =2043918303038493u64;
-pub const GLOBAL_TRAPDOOR_K3: u64 =4720393228394937u64;
-pub const GLOBAL_TRAPDOOR_A: u64 = 8493929384939513u64;
-*/
-
 #[derive(Debug,Clone)]
 pub struct ParamsKzgCq<PE:Engine>{
 	pub pkey: KzgProverKey<PE>,
@@ -58,6 +31,7 @@ pub struct ParamsKzgCq<PE:Engine>{
 impl<E:Engine> ParamsKzgCq<E> where
     E::G1Affine: SerdeCurveAffine,
     E::G1: CurveExt<AffineExt = E::G1Affine>{
+
 	/// return a pair of ParamsKZG and ParamsKzgCq with the same
 	/// trapdoor. k_kzg is for ParamsKZG, and n_cap is the lookup table
 	/// size (has to be a power of 2), and n2_raw is the query table
@@ -197,10 +171,8 @@ pub fn default_trapdoor<PE:Engine>() -> KzgTrapDoor<PE::Fr>{
 // region: batch KZG related
 // ------------------------------------
 
-/** 
-	Precompute the kzg proofs for T(X) evaluates to a T(\omega^i) for each i.
-	This is the algorithm presented in "Fast Amortized KZG Proof" 
- */
+/// Precompute the kzg proofs for T(X) evaluates to a T(\omega^i) for each i.
+///	This is the algorithm presented in "Fast Amortized KZG Proof" 
 pub fn precompute_kzg_proof<G:PrimeCurveAffine>(
 	table: &Vec<G::Scalar>, n: usize, kzg_key: &Vec<G>
 	)->Vec<G>{
@@ -277,29 +249,6 @@ pub fn precompute_lag_group<G:PrimeCurveAffine>(
 	fixed_msm(g1, &arr_l_i)
 }
 
-/*
-
-/// compute all L_i(0) for i in [0, n)
-pub fn precompute_lag0_fe<F:FftField>(n: usize)->Vec<F>{
-	precompute_lags::<F>(n, F::zero())
-}
-
-/// compute all [(L_i(s)-L_i(0))/s] for each i
-pub fn precompute_lag_diff<G:AffineCurve>(
-	n: usize, 
-	s: G::ScalarField)
-	->Vec<G> where <G as AffineCurve>::Projective: VariableBaseMSM<MSMBase=G, Scalar=<G as AffineCurve>::ScalarField>{
-	let s_inv = s.invert().unwrap();
-	let arr1 = precompute_lags::<G::ScalarField>(n, s);
-	let arr2 = precompute_lags::<G::ScalarField>(n, G::ScalarField::zero());
-	let res = arr1.into_par_iter().zip(arr2.into_par_iter()).map(|(x,y)|
-		(x - y) * s_inv).collect::<Vec<G::ScalarField>>();
-	let g1 = G::prime_subgroup_generator();
-
-	fixed_msm(g1, &res)
-}
-*/
-
 /// compute z_n'(omega^i) for each i in [0, n). Note ' means 
 /// derive function.
 pub fn compute_derive_vanish<F:PrimeField>(n: usize) ->Vec<F>{
@@ -326,87 +275,10 @@ pub fn precompute_quotient_poly<G:PrimeCurveAffine>(
 
 	res
 }
-/*
-
-
-/// This function calculates Lagrange basis polynomials for a given input polynomial. 
-/// It first generates n points on the unit circle (roots of unity), 
-/// where n is the degree of the input polynomial + 1. Then,
-/// for each point x_i, it computes the i-th 
-/// Lagrange polynomial l_i(x) such that l_i(x) = 1 if x = x_i
-/// and 0 otherwise. 
-/// The function returns a vector of all the Lagrange basis polynomials. 
-pub fn logical_precompute_lag<F: FftField>(poly: &DensePolynomial<F>) -> Vec<DensePolynomial<F>> {
-    
-	// Generate n x-values (roots of unity), where n is the degree of the polynomial + 1
-    let n = closest_pow2(poly.degree() + 1);
-    let root = F::get_root_of_unity(n as u64).unwrap();
-    let x_values: Vec<F> = (0..n).map(|i| root.pow([i as u64])).collect();
-
-    // Initialize the vector to hold the basis polynomials
-    let mut basis_polynomials = Vec::new();
-
-    // Iterate over each x-value
-    for i in 0..x_values.len() {
-        let xi = x_values[i];
-
-        // Initialize the i-th Lagrange polynomial to 1
-        let mut li = DensePolynomial::from_coefficients_slice(&[F::ONE]);
-
-        // Iterate over all x-values
-        for j in 0..x_values.len() {
-            // Skip when i = j since we don't want to include (x - x_i) in the product
-            if i != j {
-                let xj = x_values[j];
-
-                // Compute the factor (x - x_j) / (x_i - x_j)
-                let mut factor = DensePolynomial::from_coefficients_vec(vec![-xj, F::ONE]); // x - xj
-                let divisor = (xi - xj).invert().unwrap(); // 1 / (xi - xj)
-
-                // Multiply the factor by the divisor
-                for coeff in factor.coeffs.iter_mut() {
-                    *coeff = *coeff * divisor;
-                }
-
-                // Multiply the current Lagrange polynomial by the factor
-                li = &li * &factor;
-            }
-        }
-
-        // Add the computed Lagrange polynomial to the vector
-        basis_polynomials.push(li);
-    }
-
-    // Return the Lagrange basis polynomials
-    basis_polynomials
-
-}
 
 // ------------------------------------
 // endregion: KZG related
 // ------------------------------------
-
-
-
-
-
-pub fn cq_serialize_vkey<PE:PairingEngine>(vkey: &KzgVerifierKey<PE>) 
--> Vec<u8>{
-	let mut bs: Vec<u8> = vec![];
-	let _=vkey.n.serialize(&mut bs);
-	let _=vkey.n2.serialize(&mut bs);
-	let _=vkey.s2.serialize(&mut bs);
-	let _=vkey.zv_s2.serialize(&mut bs);
-	let _=vkey.zh_s2.serialize(&mut bs);
-	let _=vkey.qa_d[0].serialize(&mut bs);
-	let _=vkey.qa_d[1].serialize(&mut bs);
-	let _=vkey.qa_a.serialize(&mut bs);
-	let _=vkey.zv_s1_raw.serialize(&mut bs);
-
-	bs
-}
-*/
-
 
 
 /// generate the 
@@ -430,7 +302,7 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	assert!(n.is_power_of_two(), "n is not power of 2");
 	assert!(n2.is_power_of_two(), "n2 is not power of 2");
 	let mut timer = Timer::new();
-	if b_perf{println!("\n** setup_kzg keys");}
+	if b_perf{println!("\n** setup_kzg keys, n: {}, n2: {}", n, n2);}
 	let s = trapdoor.s;
 	let mut vec_exp = vec![PE::Fr::ONE; big_n+1];
 	for i in 1..big_n+1 {vec_exp[i] = vec_exp[i-1] * s}
@@ -490,6 +362,7 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	for i in 0..3{assert!(qa_m[i].len()==n+n2_raw+2, "m row {} size {} !=n+n2_raw+2. n: {}, n2_raw: {}", i, qa_m[i].len(), n, n2_raw);}
 
 	//7. build the prover key P for qa_nizk
+	//TODO: improve the following
 	let k = vec![trapdoor.k1, trapdoor.k2, trapdoor.k3];
 	let mut qa_p:Vec<PE::G1Affine> = vec![];
 	for col in 0..n+n2_raw+2{
@@ -514,6 +387,7 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	let vroots = compute_powers(n2_raw - blinding_factors, root);
 	let coefs_vanish_n2_raw = vanish_poly::<PE::Fr>(&vroots);
 	let zv_s1_raw = g1 * (eval_coefs_at(&coefs_vanish_n2_raw, trapdoor.s));
+	if b_perf {log_perf(LOG1, "-- build vanish poly --", &mut timer);}
 
 	//7. return
 	//let s1 = vec_g1[1].clone();
