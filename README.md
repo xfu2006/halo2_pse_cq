@@ -10,7 +10,7 @@ size is huge and cannot be decomposed like [Lasso](https://eprint.iacr.org/2023/
 
 The API interface resembles the halo2 (plookup), e.g., supporting
 input expressions to aggregate input columns.
-For technical details, an example file is available at [cq_lookup.rs](halo_proofs/examples/cq_lookup.rs). 
+For technical details, an example file is available at [cq_lookup.rs](halo2_proofs/examples/cq_lookup.rs). 
 
 To integrate the cq protocol with halo2, we adopt 
 the commit-and-prove approach mainly for saving engineering efforts.
