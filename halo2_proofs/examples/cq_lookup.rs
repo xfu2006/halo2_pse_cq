@@ -1,7 +1,9 @@
+/// This example shows how to use cq-fold-proof to perform (vectored) lookup.
+///
 /// It is cost saving to merge multiple tables into one big cq-lookup table.
-/// This example shows how to use cq-folding to perform (vectored) lookup.
-/// The cq-table is actually a contenation of two tables: 
-/// table 1: (4 even numbers) and table 2: (4 prime numbers)
+/// The following cq lookup-table is a contenation of two tables: 
+/// table 1: (4 even numbers) and table 2: (essentially 4 prime numbers,
+///  and then padded with repetitions of these entries)
 /// TABLE1_TBL_ID           TABLE2_TBL_VALUE
 /// 0                       0                //DUMMY entry for unselected
 /// 1                       100
@@ -11,41 +13,21 @@
 /// 2                       17
 /// 2                       19
 /// 2                       97
-/// * rest are padded with (2, 97) to the given size
-///
-/// This sample also retains the 128-bit lookup argument in the
-/// examples/proof-size as an example for comparing the syntax
-/// difference between cq_lookup and halo2(plookup based).
+/// 2                       repetitions of entries ...
+/// This sample also contains one halo2-lookup argument 
+/// as comparison of syntax.
 
 
 use ff::Field;
 use std::io::Read;
 use std::collections::HashMap;
-use halo2_proofs::dev::MockProver;
-//use halo2_proofs::{
- //   circuit::{Layouter, SimpleFloorPlanner, Value},
-   // plonk::{Advice, Circuit, Column, ConstraintSystem, ErrorFront},
-//};
-//use halo2curves::pasta::Fp;
-
-//use halo2_proofs::plonk::{Expression, Selector, TableColumn,CqTableColumn};
-//use halo2_proofs::poly::Rotation;
-use halo2_backend::plonk::{cq_lookup::{
-		batch_kzg::ParamsKzgCq,
-		zk_qanizk_cq::{CqAux,CqAuxVer},
-		prover::CqProverSchemeKzg,
-		verifier::{CqVerifierSchemeKzg}
-	},
-	verifier::verify_proof_cq
-};
 use halo2_proofs::{
+	dev::MockProver,
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{
-        //create_proof, 
 		create_proof_cq, keygen_pk_cq, keygen_vk_custom_cq,
 		Advice, Circuit, Column,
         ConstraintSystem, ErrorFront,
-		//Fixed, Instance,
 		TableColumn, CqTableColumn, Selector, Expression, Instance,
     },
     poly::{
@@ -59,13 +41,17 @@ use halo2_proofs::{
     transcript::{
         Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer 
     },
-    //SerdeFormat,
+};
+use halo2_backend::plonk::{cq_lookup::{
+		batch_kzg::ParamsKzgCq,
+		zk_qanizk_cq::{CqAux,CqAuxVer,gen_hash_idx_for_tables},
+		prover::CqProverSchemeKzg,
+		verifier::{CqVerifierSchemeKzg}
+	},
+	verifier::verify_proof_cq
 };
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
-//use halo2curves::{grumpkin};
-//use halo2_proofs::plonk::{Expression, Selector, TableColumn};
 use rand_core::OsRng;
-use halo2_backend::plonk::cq_lookup::zk_qanizk_cq::gen_hash_idx_for_tables;
 
 //macros for CqTableColumns (these correspond to the unique ID of externally
 //stored tables, values and their commitments in cq_cached/ folder
@@ -73,7 +59,6 @@ pub const CQ_TABLE1_TBLID: usize = 101;
 pub const CQ_TABLE2_VAL: usize = 102;
 pub const LOOKUP_TABLE_SIZE: usize = 1usize<<8;
 
-// We use a lookup example
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 struct TestCircuit <F:Field>{
@@ -82,11 +67,13 @@ struct TestCircuit <F:Field>{
 
 #[derive(Debug, Clone)]
 struct MyConfig {
+	// for the builtin halo2-lookup
     selector: Selector,
     table: TableColumn,
     instance: Column<Instance>,
     advice: Column<Advice>,
 
+	// for the cq-lookup
 	cq_selector: Selector,
     cq_table1: CqTableColumn,
     cq_table2: CqTableColumn,
@@ -120,6 +107,7 @@ impl Circuit<Fr> for TestCircuit<Fr> {
         };
 		meta.enable_equality(config.instance);
 
+		// the default halo2 lookup
         meta.lookup("lookup", |meta| {
             let selector = meta.query_selector(config.selector);
             let not_selector = Expression::Constant(Fr::ONE) - selector.clone();
@@ -127,12 +115,14 @@ impl Circuit<Fr> for TestCircuit<Fr> {
             vec![(selector * advice + not_selector, config.table)]
         });
 
+		//cq_lookup is similar, allowing input expressions
         let cqarg_id = meta.cq_lookup("cq_lookup", |meta| {
             let selector = meta.query_selector(config.cq_selector);
             let subtable_id = meta.query_advice(config.subtable_id, 
 					Rotation::cur());
             let subtable_val = meta.query_advice(config.subtable_val, 
 					Rotation::cur());
+			//two cq-tables, each has one column
             vec![
 				(selector.clone() * subtable_id , config.cq_table1),
 				(selector * subtable_val, config.cq_table2),
@@ -142,10 +132,17 @@ impl Circuit<Fr> for TestCircuit<Fr> {
 		// This is the cq's equivalent to layouter.assign_table().
 		// Since cq_tables are fixed, we load it in config (instead of layouter)
 		// when b_reset_cache is false, and when cache exists for a 
-		// CqTableColumn, it's loaded from cache/ folder
+		// CqTableColumn, it's loaded from cache/ folder 
+		// NOTE: the cache loading from file system
+		// has not been implemented yet (TODO).
+		//
 		// The table column data is saved in the ConstraintSystem
 		// to improve: the vkey constains ConstraintSystem (later
 		// should cut the data part for vkey and retain the data for pkey) 
+		//
+		// The following mainly calls set_cq_table to set up lookup table
+		// contents. The "hs_idx" is used to perform looking up of
+		// the position of elements in lookup table when building the cq-proof.
 		let mut vid:Vec<u64> = 
 			vec![0, 1, 1, 1, 1, 2, 2, 2]; //see example on top
 		let mut vals:Vec<u64> = vec![0, 100, 200, 600, 800, 17, 19, 97];
@@ -160,7 +157,6 @@ impl Circuit<Fr> for TestCircuit<Fr> {
 		meta.set_cq_table(config.cq_table1, b_reset_cache, f_subtbl_id);
 		meta.set_cq_table(config.cq_table2, b_reset_cache, f_vals);
 		meta.set_hash_idx(cqarg_id, b_reset_cache, hs_idx);
-
 
         config
     }
@@ -189,6 +185,7 @@ impl Circuit<Fr> for TestCircuit<Fr> {
 		//set to true to test if MockProver works for failing cases
 		let b_introduce_err = false;
 		let b_introduce_err_cq = false;
+
         layouter.assign_region(
             || "assign values",
             |mut region| {
@@ -204,12 +201,12 @@ impl Circuit<Fr> for TestCircuit<Fr> {
                         || Value::known(Fr::from(value)),
                     )?;
                 }
+
 				//2. next entries from 16 to 64: for cq-lookup
                 for offset in (1<<4)..(1 << 6) {
                     config.cq_selector.enable(&mut region, offset as usize)?;
 					let mut value = if offset%2==0 {17} else {97};
 					if b_introduce_err_cq && offset==(1u64<<4) + 7{
-						// will throw error at row 23.
 						value = 333333; //not in cq tables
 					}
                     region.assign_advice(
@@ -232,28 +229,29 @@ impl Circuit<Fr> for TestCircuit<Fr> {
     }
 }
 
-const K: u32 = 9;
 
 fn main() {
-    let k = 9; 
+	//1. Mock Prover
+	let blinding_factors = 6; //blinding factors for each halo2 column 
+    let k = 9;  //log of column size
 	let column_size = 1<<k; //size of each column of halo2
     let circuit = TestCircuit { a: Fr::from(0) };
-	// blinding_factors: the blinding factors at each halo2 column
-	// when cq_prover is called, we'll verify this value
-	let blinding_factors = 6; 
-
     let public_inputs  = vec![Fr::from(0)];
-    let prover = MockProver::run(K, &circuit, vec![public_inputs.clone()]).unwrap();
+    let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
     assert_eq!(prover.verify(), Ok(()));
 
-	// params_cq needs to be generated at the same time with params
-	// as they share the same trapdoor of kzg key.
+	//2. Generating Keys needed for both PSE and CQ
 	let n_selectors = 3;
 	let selector_blinders = (0..(n_selectors*blinding_factors))
 			.map(|_| Fr::random(OsRng)).collect::<Vec<Fr>>();
-	let (params, params_cq) = ParamsKzgCq::<Bn256>::setup(k as u32, LOOKUP_TABLE_SIZE, column_size, OsRng, blinding_factors);
+	let (params, params_cq) = ParamsKzgCq::<Bn256>
+		::setup(k as u32, LOOKUP_TABLE_SIZE, column_size, 
+		OsRng, blinding_factors); //params_cq has same trapdoor with params
 	let cq_vkey = params_cq.vkey.clone();
     let compress_selectors = true;
+
+
+	//3. Preprocesssing for CQ
     let vk = keygen_vk_custom_cq(&params, &circuit, compress_selectors,
 		Some(&selector_blinders)).expect("vk should not fail");
 	let map_cq_aux:HashMap<usize,CqAux<Bn256>> = 
@@ -265,11 +263,8 @@ fn main() {
     let pk = keygen_pk_cq(&params, vk, &circuit, Some(&selector_blinders))
 		.expect("pk should not fail");
 
-    let prover = MockProver::run(k.try_into().unwrap(), 
-		&circuit, vec![vec![]]).unwrap();
-    assert_eq!(prover.verify(), Ok(()));
 
-
+	//4. Generate and Verify Proof
     let instances: &[&[Fr]] = &[&[Fr::from(0)]];
     let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
 	let cq_prover= CqProverSchemeKzg::<Bn256, Challenge255<G1Affine>, Blake2bWrite<Vec<u8>,G1Affine,Challenge255<_>>>::new(params_cq, map_cq_aux);
@@ -289,10 +284,9 @@ fn main() {
         &[instances],
         OsRng,
         &mut transcript,
-		&Some(cq_prover),
+		&Some(cq_prover), //additional parameter compared with create_proof
     )
     .expect("prover should not fail");
-
     let proof = transcript.finalize();
 	let vb_proof = proof.bytes();
 
@@ -312,9 +306,8 @@ fn main() {
         strategy,
         &[instances],
         &mut transcript,
-		Some(cq_ver),
+		Some(cq_ver), //additional parameter compared with verify_proof
     )
     .is_ok());
 	println!("k: {}, PROOF size: {}", k, vb_proof.count());
-
 }
