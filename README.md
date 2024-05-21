@@ -2,7 +2,7 @@
 
 ## Description
 
-This repository contains the [halo2](https://github.com/zcash/halo2) fork, 
+This repository contains the [halo2](https://github.com/zcash/halo2) PSE fork (using KZG as polynomial commitment), 
 with the addition of cq-lookup argument [L. Eagen, D. Fiore, and 
 A. Gabizon. "cq: Cached Quotients for Fast Lookups"](https://eprint.iacr.org/2022/1763.pdf). Compared with the halo2 (plookup) lookup already available
 in the system, cq is suitable for the case that the lookup table
@@ -10,7 +10,7 @@ size is huge and cannot be decomposed like [Lasso](https://eprint.iacr.org/2023/
 
 The API interface resembles the halo2 (plookup), e.g., supporting
 input expressions to aggregate input columns.
-For technical details, an example file is available at [cq_lookup.rs](halo_proof/examples/cq_lookup.rs). 
+For technical details, an example file is available at [cq_lookup.rs](halo_proofs/examples/cq_lookup.rs). 
 
 To integrate the cq protocol with halo2, we adopt 
 the commit-and-prove approach mainly for saving engineering efforts.
