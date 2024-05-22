@@ -18,7 +18,7 @@ use rand_core::OsRng;
 use std::cmp::{max, min};
 use crate::poly::{Coeff, Polynomial};
 use crate::arithmetic::{parallelize, eval_polynomial};
-use group::{prime::PrimeCurveAffine,GroupEncoding};
+use group::{Group,prime::PrimeCurveAffine,GroupEncoding};
 use group::{Curve};
 use crate::plonk::cq_lookup::utils::{Timer,log_perf,LOG1};
 
@@ -305,6 +305,28 @@ pub fn fixed_msm<G: PrimeCurveAffine>(base: G, vec_exp: &Vec<G::Scalar>)
 	target_g	
 }
 
+/// compute base^{s^0}, base^{s^1}, ..., base^{s^{n-1}}
+pub fn fixed_msm_s<G: PrimeCurveAffine>(base: G, s: G::Scalar, n: usize)
+	->Vec<G>{
+	let mut gs = vec![G::Curve::identity(); n as usize];
+	parallelize(&mut gs, |g, start| {
+		let mut current_g: G::Curve = base.to_curve();
+		current_g *= s.pow_vartime([start as u64]);
+		for g in g.iter_mut() {
+			*g = current_g;
+			current_g *= s;
+		}
+	});
+
+	let mut target_g = vec![G::identity(); n as usize];
+	parallelize(&mut target_g, |g_sec, starts| {
+		G::Curve::batch_normalize(&gs[starts..(starts + g_sec.len())], g_sec);
+	});
+
+	target_g	
+}
+
+
 /// compute the n'th root of unity
 pub fn get_root_of_unity<F:PrimeField>(n: u64)->F{
 	let mut r = F::ROOT_OF_UNITY;
@@ -479,7 +501,8 @@ pub fn div_by_xk<F:PrimeField>(f: &Polynomial<F, Coeff>, k: usize)
 pub fn div<F:PrimeField>(a: &Polynomial<F,Coeff>, b: &Polynomial<F,Coeff>)-> Polynomial<F,Coeff>{
 	let n1 = a.values.len();
 	let n2 = b.values.len();
-	let n = if n1>n2 {n1*2} else {n2*2};
+	//let n = if n1>n2 {n1*2} else {n2*2};
+	let n = if n1>n2 {closest_pow2(n1)} else {closest_pow2(n2)};
 	let v1 = extend_vec(&a.values, n);
 	let v2 = extend_vec(&b.values, n);
 	let shift = F::random(OsRng);
@@ -489,7 +512,7 @@ pub fn div<F:PrimeField>(a: &Polynomial<F,Coeff>, b: &Polynomial<F,Coeff>)-> Pol
 		x*y.invert().unwrap()
 		).  collect::<Vec<F>>();
 	let coef_q = evals_to_coefs(&v_3, shift);
-	let coef_q = coef_q[0..n/2].to_vec();
+	//let coef_q = coef_q[0..n/2].to_vec();
 
 	Polynomial{values: coef_q, _marker: PhantomData}
 }

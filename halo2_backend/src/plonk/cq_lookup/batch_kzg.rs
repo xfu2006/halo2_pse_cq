@@ -19,7 +19,7 @@ use group::ff::{Field,PrimeField};
 use group::prime::PrimeCurveAffine;
 use crate::plonk::SerdeCurveAffine;
 use rand_core::OsRng;
-use crate::plonk::cq_lookup::ft_poly_ops::{compute_powers,vanish_poly,fixed_msm,closest_pow2,get_root_of_unity,eval_coefs_at, evals_to_coefs, serial_group_fft,serial_fft, serial_group_ifft};
+use crate::plonk::cq_lookup::ft_poly_ops::{compute_powers,vanish_poly,fixed_msm,fixed_msm_s, closest_pow2,get_root_of_unity,eval_coefs_at, evals_to_coefs, serial_group_fft,serial_fft, serial_group_ifft};
 
 
 #[derive(Debug,Clone)]
@@ -302,7 +302,7 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	assert!(n.is_power_of_two(), "n is not power of 2");
 	assert!(n2.is_power_of_two(), "n2 is not power of 2");
 	let mut timer = Timer::new();
-	if b_perf{println!("\n** setup_kzg keys, n: {}, n2: {}", n, n2);}
+	if b_perf{println!("\n** setup_kzg keys, n: {}, n2: {}, big_n: {}", n, n2, big_n);}
 	let s = trapdoor.s;
 	let mut vec_exp = vec![PE::Fr::ONE; big_n+1];
 	for i in 1..big_n+1 {vec_exp[i] = vec_exp[i-1] * s}
@@ -310,12 +310,12 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 
 	//2. build ( [s^0]_1, ..., [s^n]_1 ) on G1
 	let g1 = PE::G1Affine::generator();
-	let vec_g1 = fixed_msm(g1, &vec_exp);
+	let vec_g1 = fixed_msm_s(g1, s, big_n+1);
 	if b_perf {log_perf(LOG1, "-- build [s^i]_1 --", &mut timer);}
 
 	//3. build ( [s^0]_1, ..., [s^n]_1 ) on G2
 	let g2 = PE::G2Affine::generator();
-	let vec_g2 = fixed_msm(g2, &vec_exp);
+	let vec_g2 = fixed_msm_s(g2, s, n+1);
 	if b_perf {log_perf(LOG1, "-- build [s^i]_2 --", &mut timer);}
 
 	//4. build the zv_s2 and zv_s1
@@ -345,11 +345,13 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	let mut row1= all_lag.clone();
 	row1.push(zh_s1);
 	row1.append(&mut vec![g_zero.into(); n2_raw+1]);
+	if b_perf {log_perf(LOG1, "-- build QA row1 --", &mut timer);}
 
 	let mut row2 = vec![g_zero.into(); n+1];
 	let mut row2_p2 = (&all_lag_n2[0..n2_raw]).to_vec(); //chop off rest
 	row2_p2.push(zv_s1);
 	row2.append(&mut row2_p2);
+	if b_perf {log_perf(LOG1, "-- build QA row2 --", &mut timer);}
 
 	let mut row3 = vec![g_one.into(); n];
 	row3.push(g_zero.into());
@@ -360,10 +362,12 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	row3.append(&mut row3_p2_2);
 	let qa_m = vec![row1, row2, row3];
 	for i in 0..3{assert!(qa_m[i].len()==n+n2_raw+2, "m row {} size {} !=n+n2_raw+2. n: {}, n2_raw: {}", i, qa_m[i].len(), n, n2_raw);}
+	if b_perf {log_perf(LOG1, "-- build QA row3 --", &mut timer);}
 
 	//7. build the prover key P for qa_nizk
 	//TODO: improve the following
 	let k = vec![trapdoor.k1, trapdoor.k2, trapdoor.k3];
+	/*
 	let mut qa_p:Vec<PE::G1Affine> = vec![];
 	for col in 0..n+n2_raw+2{
 		let mut res = g_zero.clone();
@@ -373,6 +377,13 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 		}
 		qa_p.push(res.into());
 	}
+	*/
+	let row_n = qa_m[0].len();
+	let qa_p = (0..row_n).into_par_iter().map(|i|
+		qa_m.iter().enumerate().map(|(row_id, row)| 
+			(row[i].to_curve() * k[row_id])).sum::<PE::G1>().to_affine()
+	).collect::<Vec<PE::G1Affine>>();
+	if b_perf {log_perf(LOG1, "-- build QA qa_p --", &mut timer);}
 
 	//8. build the verifiyer key [a]_2 and C for qa_nizk (as qa_d)
 	let a = trapdoor.a;
@@ -380,6 +391,7 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	let qa_d:Vec<PE::G2Affine> = vec![(g2 * (trapdoor.k1*a)).to_affine(),
 		(g2 * (trapdoor.k2*a)).to_affine(), 
 		(g2 * (trapdoor.k3*a)).to_affine()];
+	if b_perf {log_perf(LOG1, "-- build QA qa_a --", &mut timer);}
 	if b_perf {log_perf(LOG1, "-- build QA-NIZK keys --", &mut timer);}
 
 	//9. compute the coef for vanish array
