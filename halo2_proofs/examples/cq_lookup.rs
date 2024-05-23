@@ -57,7 +57,7 @@ use rand_core::OsRng;
 //stored tables, values and their commitments in cq_cached/ folder
 pub const CQ_TABLE1_TBLID: usize = 101;
 pub const CQ_TABLE2_VAL: usize = 102;
-pub const LOOKUP_TABLE_SIZE: usize = 1usize<<8;
+pub const LOOKUP_TABLE_SIZE: usize = 1usize<<16;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]

@@ -88,7 +88,7 @@ pub fn preprocess_cq<PE:Engine>(
 	<PE as Engine>::G1Affine: CurveAffine<ScalarExt=PE::Fr>,
 	{
 	//1. compute the quotient polynomials
-	let b_perf = false;
+	let b_perf = true;
 	let mut timer = Timer::new();
 	if b_perf{println!("\n** preprocess cq");}
 	let n = pk.n;

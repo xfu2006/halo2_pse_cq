@@ -345,13 +345,11 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	let mut row1= all_lag.clone();
 	row1.push(zh_s1);
 	row1.append(&mut vec![g_zero.into(); n2_raw+1]);
-	if b_perf {log_perf(LOG1, "-- build QA row1 --", &mut timer);}
 
 	let mut row2 = vec![g_zero.into(); n+1];
 	let mut row2_p2 = (&all_lag_n2[0..n2_raw]).to_vec(); //chop off rest
 	row2_p2.push(zv_s1);
 	row2.append(&mut row2_p2);
-	if b_perf {log_perf(LOG1, "-- build QA row2 --", &mut timer);}
 
 	let mut row3 = vec![g_one.into(); n];
 	row3.push(g_zero.into());
@@ -362,28 +360,15 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	row3.append(&mut row3_p2_2);
 	let qa_m = vec![row1, row2, row3];
 	for i in 0..3{assert!(qa_m[i].len()==n+n2_raw+2, "m row {} size {} !=n+n2_raw+2. n: {}, n2_raw: {}", i, qa_m[i].len(), n, n2_raw);}
-	if b_perf {log_perf(LOG1, "-- build QA row3 --", &mut timer);}
 
 	//7. build the prover key P for qa_nizk
 	//TODO: improve the following
 	let k = vec![trapdoor.k1, trapdoor.k2, trapdoor.k3];
-	/*
-	let mut qa_p:Vec<PE::G1Affine> = vec![];
-	for col in 0..n+n2_raw+2{
-		let mut res = g_zero.clone();
-		for row in 0..3{
-			let part_res = qa_m[row][col] * k[row];
-			res = res + &part_res;
-		}
-		qa_p.push(res.into());
-	}
-	*/
 	let row_n = qa_m[0].len();
 	let qa_p = (0..row_n).into_par_iter().map(|i|
 		qa_m.iter().enumerate().map(|(row_id, row)| 
 			(row[i].to_curve() * k[row_id])).sum::<PE::G1>().to_affine()
 	).collect::<Vec<PE::G1Affine>>();
-	if b_perf {log_perf(LOG1, "-- build QA qa_p --", &mut timer);}
 
 	//8. build the verifiyer key [a]_2 and C for qa_nizk (as qa_d)
 	let a = trapdoor.a;
@@ -391,7 +376,6 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 	let qa_d:Vec<PE::G2Affine> = vec![(g2 * (trapdoor.k1*a)).to_affine(),
 		(g2 * (trapdoor.k2*a)).to_affine(), 
 		(g2 * (trapdoor.k3*a)).to_affine()];
-	if b_perf {log_perf(LOG1, "-- build QA qa_a --", &mut timer);}
 	if b_perf {log_perf(LOG1, "-- build QA-NIZK keys --", &mut timer);}
 
 	//9. compute the coef for vanish array
