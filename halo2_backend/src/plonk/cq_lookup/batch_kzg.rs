@@ -71,8 +71,6 @@ pub struct KzgProverKey<PE:Engine>{
 	pub blinding_factors: usize,
 	/// [s^0]_1, [s^1]_1, ..., [s^n]_1
 	pub vec_g1: Vec<PE::G1Affine>,
-	/// [s^0]_2, [s^1]_2, ..., [s^n]_2
-	pub vec_g2: Vec<PE::G2Affine>,
 	/// qa_nizk matrix M
 	pub qa_m: Vec<Vec<PE::G1Affine>>,
 	/// qz_nizk prover key P
@@ -315,8 +313,6 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 
 	//3. build ( [s^0]_1, ..., [s^n]_1 ) on G2
 	let g2 = PE::G2Affine::generator();
-	let vec_g2 = fixed_msm_s(g2, s, n+1);
-	if b_perf {log_perf(LOG1, "-- build [s^i]_2 --", &mut timer);}
 
 	//4. build the zv_s2 and zv_s1
 	let f_zh = s.pow(&[n as u64]) - PE::Fr::ONE;
@@ -387,9 +383,9 @@ pub fn setup_kzg<PE:Engine>(n: usize, n2_raw: usize,
 
 	//7. return
 	//let s1 = vec_g1[1].clone();
-	let s2 = vec_g2[1].clone();
+	let s2 = (g2*s).to_affine();
 	let pkey = KzgProverKey{n: n, n2_raw: n2_raw, n2: n2,
-		vec_g1: vec_g1, vec_g2: vec_g2, 
+		vec_g1: vec_g1,  
 		lag_all: all_lag, 
 		lag_all_2: all_lag_2, 
 		lag_all_n2: all_lag_n2, 
