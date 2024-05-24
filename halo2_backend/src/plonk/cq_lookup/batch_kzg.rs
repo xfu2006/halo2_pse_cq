@@ -39,14 +39,22 @@ impl<E:Engine> ParamsKzgCq<E> where
 	pub fn setup<R: RngCore + std::clone::Clone>(
 		k_kzg: u32, n_cap: usize, n2_raw: usize, rng: R, blinding_factors: usize)->
 		(ParamsKZG<E>, ParamsKzgCq<E>){
-		let mut trapdoor = default_trapdoor_rng::<E,R>(rng);
+		let trapdoor = default_trapdoor_rng::<E,R>(rng);
+
+		Self::setup_with_trapdoor(k_kzg, n_cap, n2_raw, blinding_factors,
+			&trapdoor)
+	}
+
+	pub fn setup_with_trapdoor(
+		k_kzg: u32, n_cap: usize, n2_raw: usize, 
+		blinding_factors: usize, trapdoor: &KzgTrapDoor<E::Fr>)
+		-> (ParamsKZG<E>, ParamsKzgCq<E>){
 		let s = trapdoor.s;
 		let params_kzg:ParamsKZG<E> = ParamsKZG::setup_with_s(k_kzg, s);
-		trapdoor.s = s;
 		let (pkey, vkey) = setup_kzg(n_cap, n2_raw, &trapdoor, blinding_factors);
 
 		(params_kzg, Self{pkey, vkey})
-	}
+		}
 }
 
 

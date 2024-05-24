@@ -7,7 +7,7 @@ use itertools::Itertools;
 use self::rayon::prelude::*; 
 use halo2curves::pairing::Engine;
 use std::collections::HashMap;
-use crate::plonk::cq_lookup::batch_kzg::{KzgProverKey,KzgVerifierKey,precompute_quotient_poly};
+use crate::plonk::cq_lookup::batch_kzg::{KzgProverKey,KzgVerifierKey,precompute_quotient_poly, precompute_lags};
 use group::ff::{Field,PrimeField};
 use group::{Curve,prime::PrimeCurveAffine};
 //use std::sync::Arc;
@@ -16,6 +16,7 @@ use rand_core::OsRng;
 use crate::plonk::cq_lookup::ft_poly_ops::{vmsm, hash, to_vecu8, to_vecu8_field, compute_coefs_of_lag_points,coefs_to_evals, eval_z_h_over_2n, evals_to_coefs, eval_coefs_at, get_root_of_unity, get_poly, mul, print_poly,eq_poly, div, minus, compute_powers};
 use halo2curves::CurveAffine;
 use crate::plonk::cq_lookup::ft_poly_ops::closest_pow2;
+use crate::arithmetic::parallelize;
 
 
 
@@ -100,10 +101,72 @@ pub fn preprocess_cq<PE:Engine>(
 		.collect();
 
 	//2. compute the Commit_T = [T(s)]_1 + [r*z_V(s)]_1
-	let (r_t, commit_t2, _) = ped_commit(lookup_table, n, 
+	let (r_t, commit_t2, _commit_t_2_raw) = ped_commit(lookup_table, n, 
 		&pk.lag_all_2, pk.zh_s2);
 	let (_, _, t_s1) = ped_commit(lookup_table, n, 
 		&pk.lag_all, pk.zh_s1);
+	CqAux{n: n, commit_t2: commit_t2, r_t: r_t, arr_q: arr_q,
+		map_idx: map_idx, t_s_1: t_s1}
+}
+
+
+
+/// this function DIRECTLY generates the commit_t given trapdoor s
+/// It should be called by the TRUSTED SETUP (for case table T)
+/// which T is passed to the trusted set up.
+/// It is much faster than preprocess, however, then the system
+/// have MORE dependence on the trusted setup (per-circuit then).
+pub fn preprocess_cq_with_trapdoor<PE:Engine>(
+	pk: &KzgProverKey<PE>, 
+	lookup_table: &Vec<PE::Fr>, s: PE::Fr)-> CqAux<PE> 
+	where <PE as Engine>::G2Affine: CurveAffine<ScalarExt=PE::Fr>,
+	<PE as Engine>::G1Affine: CurveAffine<ScalarExt=PE::Fr>, {
+	//1. set up
+	let b_perf = true;
+	let mut timer = Timer::new();
+	if b_perf{println!("\n** preprocess cq with s");}
+	let n = pk.n;
+
+	//2. compute the value t(s) = sum t_i L_i(s)
+	let lags_s = precompute_lags(n, s);
+	assert!(lookup_table.len()==n, "lookup_table.len: {} !=n : {}",
+		lookup_table.len(), n);
+	let t_s: PE::Fr = (0..n).into_par_iter().map(|i|
+		lags_s[i] * lookup_table[i]).sum();
+	let r_t = PE::Fr::random(OsRng);
+	let g2 = PE::G2Affine::generator();
+	let g1 = PE::G1Affine::generator();
+	let commit_t2 = ((g2 * t_s) + (pk.zh_s2*r_t)).to_affine();
+	let t_s1 = (g1 * t_s).to_affine();
+	if b_perf{log_perf(LOG1, "-- commit_t2 ", &mut timer);}
+
+	//3. precompute the quotient poly
+	let mut kzg_proofs = vec![PE::Fr::ZERO; n];
+	let omega = get_root_of_unity::<PE::Fr>(n as u64);
+	parallelize(&mut kzg_proofs, |sec, start|{
+		let mut current_g = omega.pow_vartime([start as u64]);
+		let mut i = 0;
+		for g in sec.iter_mut() {
+			*g = (t_s - lookup_table[start+i])*((s-current_g).invert().unwrap());
+			current_g *= omega;
+			i +=1;
+		}
+	});
+	let arr_omega = compute_powers::<PE::Fr>(n, omega);
+	let fe_n = PE::Fr::from(n as u64);
+	let z_n_prime = arr_omega.into_par_iter().map(|x|
+		fe_n*x.invert().unwrap()).collect::<Vec<PE::Fr>>();
+	let arr_q = kzg_proofs.into_par_iter().zip(z_n_prime.into_par_iter())
+		.map(|(x,y)| ((g1*x) * (y.invert().unwrap())).to_affine() )
+		.collect::<Vec<PE::G1Affine>>();
+	if b_perf{log_perf(LOG1, "-- quotient poly (quick) ", &mut timer);}
+
+	let map_idx:HashMap<Vec<u8>, usize> = lookup_table.par_iter().enumerate()
+		.map(|(idx, v)| (v.to_repr().as_ref().to_vec(), idx))
+		.collect();
+	if b_perf{log_perf(LOG1, "-- bulid map_idx", &mut timer);}
+
+
 	CqAux{n: n, commit_t2: commit_t2, r_t: r_t, arr_q: arr_q,
 		map_idx: map_idx, t_s_1: t_s1}
 }

@@ -6,7 +6,7 @@ use halo2_middleware::{lookup, permutation::ArgumentMid, shuffle, cq_lookup};
 use std::collections::HashMap;
 use crate::plonk::cq_lookup::{
 	batch_kzg::ParamsKzgCq,
-	zk_qanizk_cq:: {CqAux,preprocess_cq}
+	zk_qanizk_cq:: {CqAux,preprocess_cq, preprocess_cq_with_trapdoor}
 };
 use halo2curves::pairing::Engine;
 use halo2curves::CurveAffine;
@@ -135,6 +135,36 @@ impl<F: Field> ConstraintSystemBack<F> {
 	}
 
 
+	///FASTER version with trapdoor.
+	/// It generate the hashmap which from column ID maps to the
+	/// CqAux. This should only be called when lookup table is T,
+	/// and by the trusted setup.
+	pub fn preprocess_cq_with_trapdoor<E:Engine<Fr=F>>(&self,
+		params: &ParamsKzgCq<E>, s: F)
+	-> HashMap<usize, CqAux<E>> 
+	where 
+		<E as Engine>::G2Affine: CurveAffine<ScalarExt=F>,
+		<E as Engine>::G1Affine: CurveAffine<ScalarExt=F>
+	{
+		let mut hs = HashMap::<usize, CqAux<E>>::new();
+		if self.cq_lookups.len()==0 {return hs;}
+		//Restriction: all cq_looup table MUST BE of the same size
+		//this can be relaxed later in implementation
+		for cq_arg in &self.cq_lookups{
+			for i in 0..cq_arg.table_ids.len(){
+				let col_id = cq_arg.table_ids[i];
+				let tbl = &cq_arg.vec_columns[i];
+				let cap_n = tbl.len();
+				assert!(cap_n==params.pkey.n, "tbl len: {} != params.n: {}",
+					cap_n, params.pkey.n);
+				let cq_aux = preprocess_cq_with_trapdoor::<E>(
+					&params.pkey, tbl, s);
+				hs.insert(col_id, cq_aux);
+			}
+		}
+
+		hs
+	}
     /// Compute the degree of the constraint system (the maximum degree of all
     /// constraints).
     pub fn degree(&self) -> usize {

@@ -43,7 +43,7 @@ use halo2_proofs::{
     },
 };
 use halo2_backend::plonk::{cq_lookup::{
-		batch_kzg::ParamsKzgCq,
+		batch_kzg::{ParamsKzgCq,default_trapdoor},
 		zk_qanizk_cq::{CqAux,CqAuxVer,gen_hash_idx_for_tables},
 		prover::CqProverSchemeKzg,
 		verifier::{CqVerifierSchemeKzg}
@@ -57,7 +57,7 @@ use rand_core::OsRng;
 //stored tables, values and their commitments in cq_cached/ folder
 pub const CQ_TABLE1_TBLID: usize = 101;
 pub const CQ_TABLE2_VAL: usize = 102;
-pub const LOOKUP_TABLE_SIZE: usize = 1usize<<16;
+pub const LOOKUP_TABLE_SIZE: usize = 1usize<<8;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -241,12 +241,24 @@ fn main() {
     assert_eq!(prover.verify(), Ok(()));
 
 	//2. Generating Keys needed for both PSE and CQ
+	// when b_fast mode is true, we use trusetd_setup to generate
+	// commit_lookup_table and cached polynomials. In this case, 
+	// the preprocessing can be much faster. This can only be used
+	// when lookup tables are public.
+	let b_fast_mode = true;
 	let n_selectors = 3;
 	let selector_blinders = (0..(n_selectors*blinding_factors))
 			.map(|_| Fr::random(OsRng)).collect::<Vec<Fr>>();
-	let (params, params_cq) = ParamsKzgCq::<Bn256>
-		::setup(k as u32, LOOKUP_TABLE_SIZE, column_size, 
-		OsRng, blinding_factors); //params_cq has same trapdoor with params
+	let trapdoor = default_trapdoor::<Bn256>();  //used for "fast mode"
+	let (params, params_cq) = if !b_fast_mode {
+		ParamsKzgCq::<Bn256>::setup(k as u32, LOOKUP_TABLE_SIZE, column_size, 
+			OsRng, blinding_factors) //params_cq has same trapdoor with params
+	}else{
+		ParamsKzgCq::<Bn256>::setup_with_trapdoor(k as u32, 
+			LOOKUP_TABLE_SIZE, column_size, blinding_factors,
+			&trapdoor) 
+	};
+
 	let cq_vkey = params_cq.vkey.clone();
     let compress_selectors = true;
 
@@ -254,8 +266,11 @@ fn main() {
 	//3. Preprocesssing for CQ
     let vk = keygen_vk_custom_cq(&params, &circuit, compress_selectors,
 		Some(&selector_blinders)).expect("vk should not fail");
-	let map_cq_aux:HashMap<usize,CqAux<Bn256>> = 
-		vk.cs().preprocess_cq(&params_cq);
+	let map_cq_aux:HashMap<usize,CqAux<Bn256>> = if !b_fast_mode{
+		vk.cs().preprocess_cq(&params_cq)
+	}else{
+		vk.cs().preprocess_cq_with_trapdoor(&params_cq, trapdoor.s)
+	};
 	let mut map_cq_aux_ver: HashMap<usize, CqAuxVer<Bn256>> = HashMap::new();
 	for (k,v) in map_cq_aux.iter(){
 		map_cq_aux_ver.insert(*k, v.to_cq_aux_ver());
