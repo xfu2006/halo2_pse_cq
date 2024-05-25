@@ -20,6 +20,7 @@
 
 use ff::Field;
 use std::io::Read;
+use std::fs::File;
 use std::collections::HashMap;
 use halo2_proofs::{
 	dev::MockProver,
@@ -31,8 +32,9 @@ use halo2_proofs::{
 		TableColumn, CqTableColumn, Selector, Expression, Instance,
     },
     poly::{
+		commitment::{Params},
         kzg::{
-            commitment::{KZGCommitmentScheme}, // ParamsKZG},
+            commitment::{KZGCommitmentScheme, ParamsKZG},
             multiopen::{ProverGWC, VerifierGWC},
             strategy::SingleStrategy,
         },
@@ -46,7 +48,8 @@ use halo2_backend::plonk::{cq_lookup::{
 		batch_kzg::{ParamsKzgCq,default_trapdoor},
 		zk_qanizk_cq::{CqAux,CqAuxVer,gen_hash_idx_for_tables},
 		prover::CqProverSchemeKzg,
-		verifier::{CqVerifierSchemeKzg}
+		verifier::{CqVerifierSchemeKzg},
+		utils::{Timer,log_perf,LOG1}
 	},
 	verifier::verify_proof_cq
 };
@@ -232,6 +235,8 @@ impl Circuit<Fr> for TestCircuit<Fr> {
 
 fn main() {
 	//1. Mock Prover
+	let b_perf = true;
+	let mut timer = Timer::new();
 	let blinding_factors = 6; //blinding factors for each halo2 column 
     let k = 9;  //log of column size
 	let column_size = 1<<k; //size of each column of halo2
@@ -246,21 +251,47 @@ fn main() {
 	// the preprocessing can be much faster. This can only be used
 	// when lookup tables are public.
 	let b_fast_mode = true;
+	let b_read_cache = false;
+	let b_write_cache = true;
 	let n_selectors = 3;
 	let selector_blinders = (0..(n_selectors*blinding_factors))
 			.map(|_| Fr::random(OsRng)).collect::<Vec<Fr>>();
 	let trapdoor = default_trapdoor::<Bn256>();  //used for "fast mode"
-	let (params, params_cq) = if !b_fast_mode {
-		ParamsKzgCq::<Bn256>::setup(k as u32, LOOKUP_TABLE_SIZE, column_size, 
-			OsRng, blinding_factors) //params_cq has same trapdoor with params
-	}else{
-		ParamsKzgCq::<Bn256>::setup_with_trapdoor(k as u32, 
-			LOOKUP_TABLE_SIZE, column_size, blinding_factors,
-			&trapdoor) 
+	let (params, params_cq) = if b_read_cache{//read from cache
+		let mut timer = Timer::new();
+		let params = ParamsKZG::<Bn256>::read(&mut File::open("target/cache/kzg.dat").unwrap() ).expect("reading ParamsKZG failed!");
+		let params_cq = ParamsKzgCq::<Bn256>::read("target/cache/params_cq").expect("reading ParamsKzgCQ failed");
+		if b_perf{log_perf(LOG1, "-- read params_cq", &mut timer);}
+		(params, params_cq)
+	}else{//write cache
+		if !b_fast_mode {
+			ParamsKzgCq::<Bn256>
+				::setup(k as u32, LOOKUP_TABLE_SIZE, 
+				column_size, OsRng, blinding_factors) 
+				//params_cq has same trapdoor with params
+		}else{
+			ParamsKzgCq::<Bn256>::setup_with_trapdoor(k as u32, 
+				LOOKUP_TABLE_SIZE, column_size, blinding_factors, &trapdoor) 
+		}
 	};
+	if b_write_cache{
+		let mut timer = Timer::new();
+		let mut w1 = File::create("target/cache/kzg.dat").unwrap();
+		params.write(&mut w1).unwrap();
+		if b_perf{log_perf(LOG1, "-- write kzg_params", &mut timer);}
+		params_cq.write("target/cache/params_cq").unwrap();
+		if b_perf{log_perf(LOG1, "-- write params_cq", &mut timer);}
+
+	}
+		//REMOVE LATER ---------
+		let params = ParamsKZG::<Bn256>::read(&mut File::open("target/cache/kzg.dat").unwrap() ).expect("reading ParamsKZG failed!");
+		let params_cq = ParamsKzgCq::<Bn256>::read("target/cache/params_cq").expect("reading ParamsKzgCQ failed");
+		println!("DEBUG USE 999: return the read out samples");
+		//REMOVE LATER --------- ABOVE
 
 	let cq_vkey = params_cq.vkey.clone();
     let compress_selectors = true;
+	if b_perf{log_perf(LOG1, "** Generating KZG and CQ Params", &mut timer);}
 
 
 	//3. Preprocesssing for CQ
