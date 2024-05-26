@@ -225,26 +225,20 @@ PE::Fr: SerdePrimeField + FromUniformBytes<64>
 		par_write_vec(&self.qa_m[2], &format!("{}_{}", prefix, "qa_m2"))?;
 		par_write_vec(&self.qa_p, &format!("{}_{}", prefix, "qa_p"))?;
 		par_write_vec(&self.coefs_vanish_n2_raw, &format!("{}_{}", prefix, "coefs_vanish_n2_raw"))?;
-		println!("DEBUG USE 101: coefs_vanish_n2_raw.len: {}, qa_m0[3]: {:?}", self.coefs_vanish_n2_raw.len(), self.coefs_vanish_n2_raw[3]);
 		par_write_vec(&self.lag_all, &format!("{}_{}", prefix, "lag_all"))?;
-		println!("DEBUG USE 101: lag_all.len: {}, qa_m0[3]: {:?}", self.lag_all.len(), self.lag_all[3]);
 		par_write_vec(&self.lag_all_n2, &format!("{}_{}", prefix, "lag_all_n2"))?;
-		println!("DEBUG USE 101: lag_all_n2.len: {}, qa_m0[3]: {:?}", self.lag_all_n2.len(), self.lag_all_n2[3]);
 		par_write_vec(&self.lag_all_2, &format!("{}_{}", prefix, "lag_all_2"))?;
-		println!("DEBUG USE 101: lag_all_2.len: {}, qa_m0[3]: {:?}", self.lag_all_2.len(), self.lag_all_2[3]);
 		Ok(())
 	}
 
 	pub fn read(prefix: &str)->io::Result<Self>{
 		let fpath = format!("{}_{}", prefix, "main");
-		println!("DEBUG USE 201: fpath: {}", &fpath);
 		let mut r = File::open(&fpath).expect(&format!("open {} fails", &fpath));
 		let n =  read_usize(&mut r);
 		let n2 = read_usize(&mut r); 
 		let n2_raw = read_usize(&mut r); 
 		let blinding_factors= read_usize(&mut r); 
 		let big_n = if n>2*closest_pow2(n2+1) {n} else {2*closest_pow2(n2+1)};
-		println!("DEBUG USE 201: n: {}, n2: {}, n2_raw: {}, blinding_factors: {}", n, n2, n2_raw, blinding_factors);
 		let zv_s1 = PE::G1Affine::read_raw(&mut r)?; 	
 		let zv_s1_raw = PE::G1Affine::read_raw(&mut r)?; 	
 		let zh_s1= PE::G1Affine::read_raw(&mut r)?; 	
@@ -290,19 +284,16 @@ PE::Fr: SerdePrimeField + FromUniformBytes<64>
 
 		par_write_vec(&self.qa_d, &format!("{}_{}", prefix, "qa_d"))?;
 
-		println!("DEBUG USE 101: n: {}, n2: {}, n2_raw: {}, g2: {:?}, s2: {:?}, zv_s2: {:?}, zh_s2: {:?}, qa_a: {:?}, zv_s1_raw: {:?}, qa_d.len: {}, qa_d[1]: {:?}", self.n, self.n2, self.n2_raw, self.g2, self.s2, self.zv_s2, self.zh_s2,  self.qa_a, self.zv_s1_raw, self.qa_d.len(), self.qa_d[1]);
 
 		Ok( () )
 	}
 
 	pub fn read(prefix: &str)->io::Result<Self>{
 		let fpath = format!("{}_{}", prefix, "main");
-		println!("DEBUG USE 201 vkey: fpath: {}", &fpath);
 		let mut r = File::open(&fpath)?;
 		let n = read_usize(&mut r);
 		let n2 = read_usize(&mut r);
 		let n2_raw = read_usize(&mut r);
-		let big_n = if n>2*closest_pow2(n2+1) {n} else {2*closest_pow2(n2+1)};
 		let g2 = PE::G2Affine::read_raw(&mut r)?;
 		let s2 = PE::G2Affine::read_raw(&mut r)?;
 		let zv_s2= PE::G2Affine::read_raw(&mut r)?;
@@ -310,7 +301,6 @@ PE::Fr: SerdePrimeField + FromUniformBytes<64>
 		let qa_a= PE::G2Affine::read_raw(&mut r)?;
 		let zv_s1_raw= PE::G1Affine::read_raw(&mut r)?;
 		let qa_d= par_read_vec::<PE::G2Affine>(3, &format!("{}_{}", prefix, "qa_d"))?;
-		println!("DEBUG USE 201: n: {}, n2: {}, n2_raw: {}, g2: {:?}, s2: {:?}, zv_s2: {:?}, zh_s2: {:?}, qa_a: {:?}, zv_s1_raw: {:?}, qa_d.len: {}, qa_d[1]: {:?}", n, n2, n2_raw, g2, s2, zv_s2, zh_s2,  qa_a, zv_s1_raw, qa_d.len(), qa_d[1]);
 
 		Ok(
 			Self{n, n2_raw, n2, g2, s2, zv_s2, zh_s2, qa_a, zv_s1_raw, qa_d}

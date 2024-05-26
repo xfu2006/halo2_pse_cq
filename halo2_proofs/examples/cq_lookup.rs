@@ -251,8 +251,8 @@ fn main() {
 	// the preprocessing can be much faster. This can only be used
 	// when lookup tables are public.
 	let b_fast_mode = true;
-	let b_read_cache = false;
-	let b_write_cache = true;
+	let b_read_cache = true;
+	let b_write_cache = false;
 	let n_selectors = 3;
 	let selector_blinders = (0..(n_selectors*blinding_factors))
 			.map(|_| Fr::random(OsRng)).collect::<Vec<Fr>>();
@@ -283,11 +283,6 @@ fn main() {
 		if b_perf{log_perf(LOG1, "-- write params_cq", &mut timer);}
 
 	}
-		//REMOVE LATER ---------
-		let params = ParamsKZG::<Bn256>::read(&mut File::open("target/cache/kzg.dat").unwrap() ).expect("reading ParamsKZG failed!");
-		let params_cq = ParamsKzgCq::<Bn256>::read("target/cache/params_cq").expect("reading ParamsKzgCQ failed");
-		println!("DEBUG USE 999: return the read out samples");
-		//REMOVE LATER --------- ABOVE
 
 	let cq_vkey = params_cq.vkey.clone();
     let compress_selectors = true;
