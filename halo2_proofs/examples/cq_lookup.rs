@@ -13,7 +13,7 @@
 /// 2                       17
 /// 2                       19
 /// 2                       97
-/// 2                       repetitions of entries ...
+/// 2                       auto-generateing entries i*100
 /// This sample also contains one halo2-lookup argument 
 /// as comparison of syntax.
 
@@ -45,8 +45,8 @@ use halo2_proofs::{
     },
 };
 use halo2_backend::plonk::{cq_lookup::{
-		batch_kzg::{ParamsKzgCq,default_trapdoor},
-		zk_qanizk_cq::{CqAux,CqAuxVer,gen_hash_idx_for_tables},
+		batch_kzg::{ParamsKzgCq,default_trapdoor, par_write_vec_adv, par_read_vec_adv},
+		zk_qanizk_cq::{CqAux,CqAuxVer,gen_hash_idx_for_tables, par_write_hash_cqaux, par_read_hash_cqaux},
 		prover::CqProverSchemeKzg,
 		verifier::{CqVerifierSchemeKzg},
 		utils::{Timer,log_perf,LOG1}
@@ -61,6 +61,9 @@ use rand_core::OsRng;
 pub const CQ_TABLE1_TBLID: usize = 101;
 pub const CQ_TABLE2_VAL: usize = 102;
 pub const LOOKUP_TABLE_SIZE: usize = 1usize<<8;
+pub static B_READ_CACHE: bool = false; //if to read keys from cache on file
+pub static B_WRITE_CACHE: bool = true; //write keys to disk
+pub static B_FAST_MODE: bool = true; //pass lookup T to trusted-setup
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -146,20 +149,37 @@ impl Circuit<Fr> for TestCircuit<Fr> {
 		// The following mainly calls set_cq_table to set up lookup table
 		// contents. The "hs_idx" is used to perform looking up of
 		// the position of elements in lookup table when building the cq-proof.
-		let mut vid:Vec<u64> = 
-			vec![0, 1, 1, 1, 1, 2, 2, 2]; //see example on top
-		let mut vals:Vec<u64> = vec![0, 100, 200, 600, 800, 17, 19, 97];
-		let n_more = LOOKUP_TABLE_SIZE - vals.len();
-		vid.append(&mut vec![2u64; n_more]);
-		vals.append(&mut vec![97u64; n_more]);
-		let f_subtbl_id:Vec<Fr> = vid.iter().map(|x| Fr::from(*x)).collect(); 
-		let f_vals:Vec<Fr> = vals.iter().map(|x| Fr::from(*x)).collect(); 
-		let b_reset_cache= true;
-		let hs_idx = if b_reset_cache 
-		{ gen_hash_idx_for_tables(&vec![f_subtbl_id.clone(), f_vals.clone()]) } 			else {HashMap::<Vec<u8>,usize>::new()};
-		meta.set_cq_table(config.cq_table1, b_reset_cache, f_subtbl_id);
-		meta.set_cq_table(config.cq_table2, b_reset_cache, f_vals);
-		meta.set_hash_idx(cqarg_id, b_reset_cache, hs_idx);
+		let b_perf = true;
+		let mut timer = Timer::new();
+
+		let (f_subtbl_id, f_vals) = if B_READ_CACHE{
+			let f_subtbl_id = par_read_vec_adv("target/cache/subtbl_id").unwrap();
+			let f_vals= par_read_vec_adv("target/cache/f_vals").unwrap();
+			if b_perf{log_perf(LOG1, "-- read subtbl_id and fvals", &mut timer);}
+
+			(f_subtbl_id, f_vals)
+		}else{
+			let mut vid:Vec<u64> = 
+				vec![0, 1, 1, 1, 1, 2, 2, 2]; //see example on top
+			let mut vals:Vec<u64> = vec![0, 100, 200, 600, 800, 17, 19, 97];
+			let n_more = LOOKUP_TABLE_SIZE - vals.len();
+			vid.append(&mut vec![2u64; n_more]);
+			for i in 0..n_more{ vals.push(((i+vals.len()) * 100) as u64); }
+			let f_subtbl_id:Vec<Fr>=vid.iter().map(|x| Fr::from(*x)).collect(); 
+			let f_vals:Vec<Fr> = vals.iter().map(|x| Fr::from(*x)).collect(); 
+
+			par_write_vec_adv(&f_subtbl_id, "target/cache/subtbl_id").unwrap();
+			par_write_vec_adv(&f_vals, "target/cache/f_vals").unwrap();
+			if b_perf{log_perf(LOG1, "-- write subtbl_id and fvals", &mut timer);}
+			(f_subtbl_id, f_vals)
+		};
+
+
+		let hs_idx = 
+		 gen_hash_idx_for_tables(&vec![f_subtbl_id.clone(), f_vals.clone()]);
+		meta.set_cq_table(config.cq_table1, f_subtbl_id);
+		meta.set_cq_table(config.cq_table2, f_vals);
+		meta.set_hash_idx(cqarg_id, hs_idx);
 
         config
     }
@@ -250,21 +270,18 @@ fn main() {
 	// commit_lookup_table and cached polynomials. In this case, 
 	// the preprocessing can be much faster. This can only be used
 	// when lookup tables are public.
-	let b_fast_mode = true;
-	let b_read_cache = true;
-	let b_write_cache = false;
 	let n_selectors = 3;
 	let selector_blinders = (0..(n_selectors*blinding_factors))
 			.map(|_| Fr::random(OsRng)).collect::<Vec<Fr>>();
 	let trapdoor = default_trapdoor::<Bn256>();  //used for "fast mode"
-	let (params, params_cq) = if b_read_cache{//read from cache
+	let (params, params_cq) = if B_READ_CACHE{//read from cache
 		let mut timer = Timer::new();
 		let params = ParamsKZG::<Bn256>::read(&mut File::open("target/cache/kzg.dat").unwrap() ).expect("reading ParamsKZG failed!");
 		let params_cq = ParamsKzgCq::<Bn256>::read("target/cache/params_cq").expect("reading ParamsKzgCQ failed");
 		if b_perf{log_perf(LOG1, "-- read params_cq", &mut timer);}
 		(params, params_cq)
 	}else{//write cache
-		if !b_fast_mode {
+		if !B_FAST_MODE {
 			ParamsKzgCq::<Bn256>
 				::setup(k as u32, LOOKUP_TABLE_SIZE, 
 				column_size, OsRng, blinding_factors) 
@@ -274,7 +291,7 @@ fn main() {
 				LOOKUP_TABLE_SIZE, column_size, blinding_factors, &trapdoor) 
 		}
 	};
-	if b_write_cache{
+	if B_WRITE_CACHE{
 		let mut timer = Timer::new();
 		let mut w1 = File::create("target/cache/kzg.dat").unwrap();
 		params.write(&mut w1).unwrap();
@@ -283,6 +300,10 @@ fn main() {
 		if b_perf{log_perf(LOG1, "-- write params_cq", &mut timer);}
 
 	}
+	//REMOVE LATER ------------
+		let params = ParamsKZG::<Bn256>::read(&mut File::open("target/cache/kzg.dat").unwrap() ).expect("reading ParamsKZG failed!");
+		let params_cq = ParamsKzgCq::<Bn256>::read("target/cache/params_cq").expect("reading ParamsKzgCQ failed");
+	//REMOVE LATER ------------ ABOVE
 
 	let cq_vkey = params_cq.vkey.clone();
     let compress_selectors = true;
@@ -292,17 +313,31 @@ fn main() {
 	//3. Preprocesssing for CQ
     let vk = keygen_vk_custom_cq(&params, &circuit, compress_selectors,
 		Some(&selector_blinders)).expect("vk should not fail");
-	let map_cq_aux:HashMap<usize,CqAux<Bn256>> = if !b_fast_mode{
-		vk.cs().preprocess_cq(&params_cq)
+	let map_cq_aux:HashMap<usize,CqAux<Bn256>> = if B_READ_CACHE{
+		par_read_hash_cqaux("target/cache/map_cq_aux")
+			.expect("read cq_aux failed")
 	}else{
-		vk.cs().preprocess_cq_with_trapdoor(&params_cq, trapdoor.s)
+		if !B_FAST_MODE{
+			vk.cs().preprocess_cq(&params_cq)
+		}else{
+			vk.cs().preprocess_cq_with_trapdoor(&params_cq, trapdoor.s)
+		}
 	};
+	if B_WRITE_CACHE{
+		let mut timer = Timer::new();
+		par_write_hash_cqaux(&map_cq_aux, "target/cache/map_cq_aux")
+			.expect("writing map_cq_aux_failed");
+		if b_perf{log_perf(LOG1, "-- write map_cq_aux", &mut timer);}
+	}
+
+
 	let mut map_cq_aux_ver: HashMap<usize, CqAuxVer<Bn256>> = HashMap::new();
 	for (k,v) in map_cq_aux.iter(){
 		map_cq_aux_ver.insert(*k, v.to_cq_aux_ver());
 	}
     let pk = keygen_pk_cq(&params, vk, &circuit, Some(&selector_blinders))
 		.expect("pk should not fail");
+	if b_perf{log_perf(LOG1, "** Generating CqAux Info", &mut timer);}
 
 
 	//4. Generate and Verify Proof

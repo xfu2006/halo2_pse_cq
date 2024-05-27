@@ -7,16 +7,22 @@ use itertools::Itertools;
 use self::rayon::prelude::*; 
 use halo2curves::pairing::Engine;
 use std::collections::HashMap;
-use crate::plonk::cq_lookup::batch_kzg::{KzgProverKey,KzgVerifierKey,precompute_quotient_poly, precompute_lags};
+use std::fs::File;
+use crate::plonk::{
+	cq_lookup::batch_kzg::{KzgProverKey,KzgVerifierKey,precompute_quotient_poly, precompute_lags, par_write_vec_adv, par_read_vec_adv, read_usize, par_write_hash, par_read_hash},
+	SerdePrimeField,FromUniformBytes, SerdeFormat, SerdeCurveAffine,
+};
 use group::ff::{Field,PrimeField};
 use group::{Curve,prime::PrimeCurveAffine};
 //use std::sync::Arc;
 use crate::plonk::cq_lookup::utils::{Timer,log_perf,LOG1};
 use rand_core::OsRng;
 use crate::plonk::cq_lookup::ft_poly_ops::{vmsm, hash, to_vecu8, to_vecu8_field, compute_coefs_of_lag_points,coefs_to_evals, eval_z_h_over_2n, evals_to_coefs, eval_coefs_at, get_root_of_unity, get_poly, mul, print_poly,eq_poly, div, minus, compute_powers};
-use halo2curves::CurveAffine;
+use halo2curves::{serde::SerdeObject,CurveAffine};
 use crate::plonk::cq_lookup::ft_poly_ops::closest_pow2;
 use crate::arithmetic::parallelize;
+use std::io;
+use std::io::{Write};
 
 
 
@@ -41,10 +47,94 @@ pub struct CqAux<PE:Engine>{
 	pub map_idx: HashMap<Vec<u8>, usize>
 }
 
-impl <PE:Engine> CqAux<PE>{
+impl <PE:Engine> CqAux<PE>
+where
+PE::G1Affine : SerdeCurveAffine,
+PE::G2Affine : SerdeCurveAffine,
+PE::Fr: SerdePrimeField + FromUniformBytes<64>{
 	pub fn to_cq_aux_ver(&self) -> CqAuxVer<PE>{
 		CqAuxVer{n: self.n, commit_t2: self.commit_t2}
 	}
+
+	pub fn par_write(&self, prefix: &str)->io::Result<()>{
+		let fpath = format!("{}_{}", prefix, "main");
+		let mut w = File::create(&fpath)?;
+		w.write_all(&self.n.to_le_bytes())?;
+		self.commit_t2.write(&mut w, SerdeFormat::RawBytes)?;
+		self.r_t.write(&mut w, SerdeFormat::RawBytes)?;
+		self.t_s_1.write(&mut w, SerdeFormat::RawBytes)?;
+
+		par_write_vec_adv(&self.arr_q, &format!("{}_arrq", prefix))?;
+		par_write_hash(&self.map_idx, &format!("{}_hsidx", prefix))?;
+
+		Ok( () )
+	}
+
+	pub fn par_read(prefix: &str) -> io::Result<Self>{
+		let b_perf = true;
+		let fpath = format!("{}_{}", prefix, "main");
+		let mut r = File::open(&fpath)?;
+		let n =  read_usize(&mut r);
+		let commit_t2 = PE::G2Affine::read_raw(&mut r)?;
+		let r_t = PE::Fr::read_raw(&mut r)?;
+		let t_s_1 = PE::G1Affine::read_raw(&mut r)?;
+		let arr_q = par_read_vec_adv::<PE::G1Affine>(&format!("{}_arrq", prefix))?;
+		let mut timer = Timer::new();
+		let map_idx = par_read_hash(&format!("{}_hsidx", prefix))?;
+		if b_perf{log_perf(LOG1, "---- establish map_idx", &mut timer);}
+
+		Ok( Self{n, commit_t2, r_t, t_s_1, arr_q, map_idx} )
+
+	}
+}
+
+/// write the hash map of cqaux to file
+pub fn par_write_hash_cqaux<PE:Engine>(hs: &HashMap<usize, CqAux<PE>>, prefix: &str)-> io::Result<()> 
+where
+PE::G1Affine : SerdeCurveAffine,
+PE::G2Affine : SerdeCurveAffine,
+PE::Fr: SerdePrimeField + FromUniformBytes<64>
+{
+	//1. get vec keys
+	let vec_keys = hs.keys().cloned().collect::<Vec<usize>>();
+	let mut mainfile = File::create(&format!("{}_keys", prefix)).
+		expect("create key file falis");
+	mainfile.write_all(&vec_keys.len().to_le_bytes())
+		.expect("write keylen fails");
+	for k in &vec_keys {mainfile.write_all(&k.to_le_bytes()).expect(
+		&format!("write key: {} fails", k));}
+
+	//2. for each cq_aux write it one by one
+	for k in &vec_keys{
+		hs[&k].par_write(&format!("{}_cqaux_{}", prefix, k))
+			.expect(&format!("write cq_aux: {} fails.", k));
+	}
+	Ok( () )
+}
+
+pub fn par_read_hash_cqaux<PE:Engine>(prefix: &str)->io::Result<HashMap<usize, CqAux<PE>>>
+where
+PE::G1Affine : SerdeCurveAffine,
+PE::G2Affine : SerdeCurveAffine,
+PE::Fr: SerdePrimeField + FromUniformBytes<64>
+{
+
+	let mut vec_keys = vec![];
+	let mut mainfile = File::open(&format!("{}_keys", prefix)).
+		expect("create key file falis");
+	let n = read_usize(&mut mainfile);
+	for _i in 0..n{
+		vec_keys.push(read_usize(&mut mainfile));
+	}
+
+	let mut hs = HashMap::<usize, CqAux<PE>>::new();
+	for k in vec_keys{
+		let cq_aux = CqAux::<PE>::par_read(&format!("{}_cqaux_{}", prefix, k)).
+			expect(&format!("read cqaux {} fails", k));
+		hs.insert(k, cq_aux);
+	}
+
+	Ok( hs )
 }
 
 /// CqAux for the verifier
@@ -393,6 +483,9 @@ fn sum<G: CurveAffine>(v: &Vec<G>)->G{
 /// require arr_lookup_table each subvector size be the same.
 pub fn gen_hash_idx_for_tables<F:PrimeField>(arr_lookup_table:&Vec<Vec<F>>)
 	-> HashMap<Vec<u8>, usize>{
+	let b_perf = false;
+	let mut timer = Timer::new();
+
 	let mut map = HashMap::<Vec<u8>, usize>::new();
 	let n = arr_lookup_table[0].len();
 	let m = arr_lookup_table.len();
@@ -403,6 +496,7 @@ pub fn gen_hash_idx_for_tables<F:PrimeField>(arr_lookup_table:&Vec<Vec<F>>)
 		let bs = to_vecu8_field(&v);
 		map.insert(bs, i);
 	}
+	if b_perf {log_perf(LOG1, &format!("-- gen_hash_idx size: {}", arr_lookup_table[0].len()), &mut timer);}
 
 	map
 }

@@ -17,7 +17,8 @@ use crate::plonk::{
 use crate::poly::kzg::commitment::ParamsKZG;
 use std::fmt::Debug;
 use std::io;
-use std::io::{Write};
+use std::io::{Write,Read};
+use std::collections::HashMap;
 
 use rand_core::RngCore;
 use group::{Curve,GroupEncoding};
@@ -30,7 +31,7 @@ use crate::plonk::cq_lookup::ft_poly_ops::{compute_powers,vanish_poly,fixed_msm,
 
 /// return the chunk size for parallel serialization.
 pub fn get_data_file_chunk_size()-> usize{
-	return 128;
+	return 1024*64;
 }
 
 #[derive(Debug,Clone,PartialEq)]
@@ -166,6 +167,33 @@ pub fn par_write_vec<C:SerdeObject + std::marker::Sync>(v: &Vec<C>, fprefix: &st
 	Ok(())
 }
 
+/// handles len automatically
+pub fn par_write_vec_adv<C:SerdeObject + std::marker::Sync>(v: &Vec<C>, fprefix: &str)->io::Result<()>{
+	//1. write the data length
+	let vlen = v.len();
+	let mainpath = format!("{}_main.dat", fprefix);
+	let mut mainfile = 
+		File::create(&mainpath).expect(&format!("Can't create {}", &mainpath));
+	mainfile.write_all( &vlen.to_le_bytes() )?;
+
+	//2. write the data
+	par_write_vec(v, fprefix)
+}
+
+
+
+//handles len authamtically
+pub fn par_read_vec_adv<C:SerdeObject + std::marker::Sync + Send>(fprefix: &str)->io::Result<Vec<C>> {
+	//1. write the data length
+	let mainpath = format!("{}_main.dat", fprefix);
+	let mut mainfile = 
+		File::open(&mainpath).expect(&format!("Can't open{}", &mainpath));
+	let n = read_usize(&mut mainfile);
+
+	//2. write the data
+	par_read_vec(n, fprefix)
+}
+
 /// based on the chunk size, read points in parallel
 pub fn par_read_vec<C:SerdeObject + std::marker::Sync + Send>(n: usize, fprefix: &str)->io::Result<Vec<C>> {
 	let chunk_size = get_data_file_chunk_size();
@@ -190,6 +218,82 @@ pub fn par_read_vec<C:SerdeObject + std::marker::Sync + Send>(n: usize, fprefix:
 	Ok(vec)
 }
 
+pub fn par_write_hash(hs: &HashMap<Vec<u8>, usize>, fprefix: &str)
+->io::Result<()>{
+	//1. we assume all vec<u8> has the same size
+	let keys:Vec<Vec<u8>> = hs.keys().cloned().collect();	
+	assert!(keys.len()>0, "hs is empty");
+	let mut mainfile = File::create(&format!("{}_main.dat", fprefix)).
+		expect(&format!("Cannot open {}_main.dat", fprefix));
+	let unit_size = keys[0].len(); 
+	for k in &keys{assert!(k.len()==unit_size, "not every key has same size!");}
+	let n = keys.len();
+	mainfile.write_all(&n.to_le_bytes())?;
+	mainfile.write_all(&unit_size.to_le_bytes())?;
+
+
+	//2. write all
+	let chunk_size = get_data_file_chunk_size();
+	let n_workers = if n%chunk_size==0 {n/chunk_size} else
+		{n/chunk_size + 1};
+	let total_written:usize = (0..n_workers).into_par_iter().map(|i| {
+		let start = i * chunk_size;
+		let fpath = format!("{}_{}.dat", fprefix, i);
+		let mut writer = File::create(&fpath).unwrap();
+		let mut end = (i+1) * chunk_size;
+		if end > n {end = n;}
+		let mut total = 0;
+		for j in start..end{
+			writer.write_all(&keys[j]).unwrap();
+			let v = hs[&keys[j]];
+			writer.write_all(&v.to_le_bytes()).unwrap();
+			total += 1;
+		}
+
+		total
+	  }
+	).sum();
+	assert!(total_written==n, "total_written: {} != n: {}", 
+		total_written, n);
+	Ok(())
+}
+
+pub fn par_read_hash(fprefix: &str)->io::Result<HashMap<Vec<u8>, usize>>{
+	//1. retrieve meta info
+	let mut mainfile = File::open(&format!("{}_main.dat", fprefix)).
+		expect(&format!("Cannot open {}_main.dat", fprefix));
+	let n = read_usize(&mut mainfile);
+	let unit_size = read_usize(&mut mainfile);
+
+	//2. read all
+	let chunk_size = get_data_file_chunk_size();
+	let n_workers = if n%chunk_size==0 {n/chunk_size} else
+		{n/chunk_size + 1};
+	let vec: Vec<(Vec<u8>, usize)>= (0..n_workers).into_par_iter().map(|i| {
+		let start = i * chunk_size;
+		let fpath = format!("{}_{}.dat", fprefix, i);
+		let mut reader = File::open(&fpath).unwrap();
+		let mut end = (i+1) * chunk_size;
+		if end > n {end = n;}
+		let mut vec: Vec<(Vec<u8>, usize)> = vec![];
+		let mut key_buf = vec![0u8; unit_size];
+		for _j in start..end{
+			reader.read_exact(&mut key_buf[..]).expect("read key fail");
+			let key = key_buf.to_vec();
+			let v = read_usize(&mut reader);
+			vec.push( (key, v) );
+		}
+	    vec
+	  }).collect::<Vec<Vec<(Vec<u8>, usize)>>>()
+	  	.into_iter().flat_map(|v| v.into_iter()).collect();
+
+	let mut hs = HashMap::<Vec<u8>, usize>::new();
+	for (k, v) in &vec{
+		hs.insert(k.clone(), *v);
+	}
+
+	Ok(hs)
+}
 
 /// read usize object from reader
 pub fn read_usize<R: io::Read>(reader: &mut R) -> usize{

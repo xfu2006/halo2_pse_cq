@@ -92,31 +92,17 @@ impl<F: Field> Argument<F> {
     }
 
 	/// set up the value of a given (single column) table
-	/// b_reset_cache: whether to reload the cache.
-	pub fn set_cq_table_value(&mut self, col_id: usize, b_reset_cache: bool,
+	pub fn set_cq_table_value(&mut self, col_id: usize,
 		vec_vals: Vec<F>){
 		let (bres, idx) = self.get_table_idx(col_id);
 		if !bres {return;}
 
-		if self.cache_exists(col_id) && !b_reset_cache{
-			unimplemented!("load from cache not implemented yet!");
-		}else{
-			self.vec_columns[idx] = vec_vals;
-		}
+		self.vec_columns[idx] = vec_vals;
 	}
 
 	/// set up the hash_idx (due to F a general Field not allowing
-	/// serilization), the hash table from row to idx has to be
-	/// build outside by calling halo2_backend/src/plonk/cq_lookup/zk_cq_nizk::gen_hash_idx_for_tables
-	/// similarly when b_reset_cache is false and cache does exist
-	/// it loads from cache 
-	pub fn set_hash_idx(&mut self, b_reset_cache: bool,
-		hash_idx: HashMap<Vec<u8>, usize>){
-		if self.cache_exists(self.table_ids[0]) && !b_reset_cache{
-			unimplemented!("load from cache not implemented yet!");
-		}else{
-			self.hs_idx= hash_idx;
-		}
+	pub fn set_hash_idx(&mut self, hash_idx: HashMap<Vec<u8>, usize>){
+		self.hs_idx= hash_idx;
 	}
 
 	/// check if the cache for table column exists

@@ -486,24 +486,24 @@ impl<F: Field> ConstraintSystem<F> {
 	/// reset the values of the cq_table for the given col_id
 	/// if b_reset_cache is true, rebuild everything regardless
 	/// of cache exists
-	pub fn set_cq_table(&mut self, col: CqTableColumn, b_reset_cache: bool,
+	pub fn set_cq_table(&mut self, col: CqTableColumn, 
 		vec_vals: Vec<F>){
 		if self.cq_lookups.len()==1{
 			self.cq_lookups[0].set_cq_table_value(col.cache_id,
-				b_reset_cache, vec_vals);
+				 vec_vals);
 		}else if self.cq_lookups.len()>1{
 			for cq_lookup_arg in &mut self.cq_lookups{
 				cq_lookup_arg.set_cq_table_value(col.cache_id, 
-					b_reset_cache, vec_vals.clone());
+					 vec_vals.clone());
 			}
 		}
 	}
 
 	/// reset the hash of row to idx (for looking items in lookup table)
-	pub fn set_hash_idx(&mut self, cq_lookup_id: usize, b_reset_cache: bool,
+	pub fn set_hash_idx(&mut self, cq_lookup_id: usize, 
 		hs_idx: HashMap<Vec<u8>,usize>){
 		self.cq_lookups[cq_lookup_id]
-				.set_hash_idx(b_reset_cache, hs_idx);
+				.set_hash_idx(hs_idx);
 	}
 
 
